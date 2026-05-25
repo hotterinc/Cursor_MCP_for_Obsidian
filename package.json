@@ -1,0 +1,25 @@
+{
+  "name": "obsidian-context-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local MCP server connecting Cursor projects to Obsidian documentation",
+  "onlyBuiltDependencies": ["electron", "esbuild"],
+  "scripts": {
+    "dev:desktop": "pnpm --filter @obsidian-context/desktop dev",
+    "build:desktop": "pnpm --filter @obsidian-context/desktop build",
+    "package:desktop": "pnpm --filter @obsidian-context/desktop package",
+    "lint:desktop": "pnpm --filter @obsidian-context/desktop lint",
+    "typecheck:desktop": "pnpm --filter @obsidian-context/desktop typecheck",
+    "python:install": "cd python && python -m uv sync --all-extras",
+    "python:test": "cd python && python -m uv run pytest tests/ -v",
+    "python:lint": "cd python && python -m uv run ruff check src tests",
+    "python:typecheck": "cd python && python -m uv run mypy src",
+    "test": "pnpm python:test",
+    "lint": "pnpm python:lint && pnpm lint:desktop",
+    "typecheck": "pnpm python:typecheck && pnpm typecheck:desktop"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

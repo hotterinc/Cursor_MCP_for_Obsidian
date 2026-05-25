@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Electron
+apps/desktop/dist/
+apps/desktop/out/
+apps/desktop/release/
+
+# Bundled Python sidecar
+apps/desktop/resources/python-sidecar/
+
+# Local app data (never commit)
+.obsidian-context-mcp/
+chroma/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Logs
+*.log
+
+# OS
+*.tmp
