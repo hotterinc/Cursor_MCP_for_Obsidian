@@ -1,7 +1,8 @@
-import { execa } from 'execa'
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { EventEmitter } from 'events'
 import { join } from 'path'
 import { app } from 'electron'
+import { getAppDataDir } from './deepLink'
 import { log } from './logger'
 
 type JsonRpcResponse = {
@@ -17,7 +18,7 @@ type PendingRequest = {
 }
 
 export class PythonSidecar extends EventEmitter {
-  private proc: ReturnType<typeof execa> | null = null
+  private proc: ChildProcessWithoutNullStreams | null = null
   private buffer = ''
   private requestId = 0
   private pending = new Map<number, PendingRequest>()
@@ -33,22 +34,27 @@ export class PythonSidecar extends EventEmitter {
     const pythonDir = join(repoRoot, 'python')
 
     if (isDev) {
-      this.proc = execa(
-        'uv',
-        ['--directory', pythonDir, 'run', 'obsidian-context-mcp', 'gui-backend', '--project-root', projectRoot],
-        { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env: { ...process.env, PYTHONUNBUFFERED: '1' } }
+      this.proc = spawn(
+        'python',
+        ['-m', 'uv', '--directory', pythonDir, 'run', 'obsidian-context-mcp', 'gui-backend', '--project-root', projectRoot],
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            PYTHONUNBUFFERED: '1',
+            OBSIDIAN_CONTEXT_DATA_DIR: getAppDataDir()
+          }
+        }
       )
     } else {
       const sidecar = join(process.resourcesPath, 'python-sidecar', 'obsidian-context-mcp')
-      this.proc = execa(sidecar, ['gui-backend', '--project-root', projectRoot], {
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe'
+      this.proc = spawn(sidecar, ['gui-backend', '--project-root', projectRoot], {
+        stdio: ['pipe', 'pipe', 'pipe']
       })
     }
 
-    this.proc.stdout?.on('data', (chunk: Buffer) => this.handleStdout(chunk.toString()))
-    this.proc.stderr?.on('data', (chunk: Buffer) => log(`[python stderr] ${chunk.toString().trim()}`))
+    this.proc.stdout.on('data', (chunk: Buffer) => this.handleStdout(chunk.toString()))
+    this.proc.stderr.on('data', (chunk: Buffer) => log(`[python stderr] ${chunk.toString().trim()}`))
     this.proc.on('exit', (code) => {
       log(`Python sidecar exited with code ${code}`)
       this.proc = null
@@ -86,7 +92,7 @@ export class PythonSidecar extends EventEmitter {
             else pending.resolve(msg.result ?? {})
           }
         }
-      } catch (e) {
+      } catch {
         log(`Failed to parse JSON-RPC line: ${line}`)
       }
     }

@@ -45,9 +45,15 @@ cd ..
 pnpm install
 ```
 
+One-command MCP start:
+
+```bash
+pnpm mcp:start
+```
+
 ## Cursor MCP configuration
 
-**Development** (recommended while hacking on this repo):
+**Development (multi-project mode, recommended)**:
 
 ```json
 {
@@ -59,9 +65,7 @@ pnpm install
         "G:/absolute/path/to/obsidian-context-mcp/python",
         "run",
         "obsidian-context-mcp",
-        "server",
-        "--project-root",
-        "G:/absolute/path/to/your/cursor/project"
+        "server"
       ]
     }
   }
@@ -83,6 +87,8 @@ pnpm install
 
 > Prefer **global/local** Cursor MCP config over committing `.cursor/mcp.json` — project-level config may accidentally commit private vault paths.
 
+If you want to pin a single project, keep `--project-root`.
+
 ## Desktop GUI
 
 ```bash
@@ -102,6 +108,41 @@ pnpm dev:desktop -- --project-root G:/path/to/project
 3. **Save configuration** — binding stored in app data
 4. **Build index** — full or incremental
 5. Use MCP tools from Cursor agents
+
+For multiple projects at the same time:
+- run one shared MCP server (`pnpm mcp:start`)
+- pass `projectRoot` in tool input when you need a specific project
+- when omitted, the server falls back to auto-detection (env/cwd/last active)
+
+### How to pin project path
+
+You can set `projectRoot` in 3 ways:
+
+1. At server startup:
+
+```bash
+python -m uv run obsidian-context-mcp server --project-root G:/work/project-a
+```
+
+2. Via environment variable:
+
+```bash
+set OBSIDIAN_CONTEXT_PROJECT_ROOT=G:/work/project-a
+pnpm mcp:start
+```
+
+3. Per tool call (recommended for multi-project):
+
+```json
+{
+  "projectRoot": "G:/work/project-b",
+  "query": "authentication architecture",
+  "topK": 10,
+  "mode": "hybrid"
+}
+```
+
+Resolution priority is: `--project-root` → `OBSIDIAN_CONTEXT_PROJECT_ROOT` → client workspace roots → cwd → last active project.
 
 ## MCP tools (highlights)
 

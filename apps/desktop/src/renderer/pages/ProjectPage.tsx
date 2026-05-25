@@ -33,6 +33,8 @@ export function ProjectPage() {
         const updated = await api.getCurrentProject()
         setProject(updated)
       }
+    } catch (e) {
+      alert(String(e instanceof Error ? e.message : e))
     } finally {
       setLoading(false)
     }

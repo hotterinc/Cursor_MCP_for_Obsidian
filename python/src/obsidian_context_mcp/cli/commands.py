@@ -25,7 +25,7 @@ def _require_ctx(project_root: str | None):
     return ctx
 
 
-def server(project_root: str = typer.Option(..., "--project-root")) -> None:
+def server(project_root: str | None = typer.Option(None, "--project-root")) -> None:
     setup_logging(level="INFO")
     asyncio.run(run_mcp_server(project_root))
 

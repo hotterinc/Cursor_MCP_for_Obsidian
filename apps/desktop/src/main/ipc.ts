@@ -191,8 +191,23 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('obsidian:getSettings', async (_e, input?: { projectRoot?: string }) => {
-    await ensureSidecar(input?.projectRoot)
-    return sidecar.call('settings.get', { project_root: input?.projectRoot ?? currentProjectRoot })
+    const root = input?.projectRoot ?? currentProjectRoot
+    if (!root) {
+      return {
+        projectRoot: null,
+        vaultPath: null,
+        writeAccess: false,
+        backupBeforeEdit: true,
+        embeddingProvider: 'sentence-transformers',
+        embeddingModel: 'intfloat/multilingual-e5-small',
+        include: ['**/*.md'],
+        exclude: ['.obsidian/**', '.git/**', 'node_modules/**', '.trash/**', 'templates/**'],
+        watcherEnabled: true,
+        appDataPath: null
+      }
+    }
+    await ensureSidecar(root)
+    return sidecar.call('settings.get', { project_root: root })
   })
 
   ipcMain.handle('obsidian:updateSettings', async (_e, input: unknown) => {

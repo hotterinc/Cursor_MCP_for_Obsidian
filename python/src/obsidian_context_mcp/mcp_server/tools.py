@@ -28,6 +28,13 @@ def _ctx(project_root: str | None) -> ProjectContext:
     return ctx
 
 
+_SETUP_HINT = (
+    "Obsidian vault is not configured. Set vaultPath via config_set_vault_path, "
+    "or open the desktop GUI (config_open_gui) → Vault Setup → choose folder → Save, "
+    "then run docs_reindex."
+)
+
+
 async def config_get_project(args: dict[str, Any]) -> dict[str, Any]:
     ctx = _ctx(args.get("projectRoot"))
     config = ctx.config
@@ -45,6 +52,7 @@ async def config_get_project(args: dict[str, Any]) -> dict[str, Any]:
         "writeAccess": config.write_access if config else False,
         "status": ctx.get_status().value,
         "indexStats": stats,
+        **({"setupHint": _SETUP_HINT} if not ctx.configured else {}),
     }
 
 
@@ -62,7 +70,13 @@ async def config_set_vault_path(args: dict[str, Any]) -> dict[str, Any]:
         include=args.get("include"),
         exclude=args.get("exclude"),
     )
-    return {"ok": True, "config": config.model_dump()}
+    return {
+        "ok": True,
+        "config": config.model_dump(),
+        "nextStep": "Run docs_reindex with mode=full to build the search index.",
+        "markdownFilesFound": validation.markdown_files_count,
+        "warnings": validation.warnings,
+    }
 
 
 async def config_open_gui(args: dict[str, Any]) -> dict[str, Any]:

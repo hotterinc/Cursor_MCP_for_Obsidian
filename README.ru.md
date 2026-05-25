@@ -38,16 +38,22 @@ pnpm install
 pnpm dev:desktop
 ```
 
-Запуск MCP server:
+Запуск MCP server (одной командой, без привязки к одному проекту):
+
+```bash
+pnpm mcp:start
+```
+
+Альтернатива напрямую:
 
 ```bash
 cd python
-python -m uv run obsidian-context-mcp server --project-root /absolute/path/to/project
+python -m uv run obsidian-context-mcp server
 ```
 
 ## Конфигурация Cursor MCP
 
-Пример (dev):
+Пример (dev, мультипроектный режим):
 
 ```json
 {
@@ -59,14 +65,14 @@ python -m uv run obsidian-context-mcp server --project-root /absolute/path/to/pr
         "G:/absolute/path/to/obsidian-context-mcp/python",
         "run",
         "obsidian-context-mcp",
-        "server",
-        "--project-root",
-        "G:/absolute/path/to/current/project"
+        "server"
       ]
     }
   }
 }
 ```
+
+Если нужно зафиксировать один проект, добавьте `--project-root`.
 
 ## Как работать
 
@@ -75,6 +81,41 @@ python -m uv run obsidian-context-mcp server --project-root /absolute/path/to/pr
 3. Сохраните конфигурацию (хранится в app data, не в git)
 4. Постройте индекс (full или incremental)
 5. В агенте используйте `docs_get_context_pack` перед реализацией
+
+Для одновременной работы с несколькими проектами:
+- сервер запускается один раз (`pnpm mcp:start`)
+- в каждом tool можно передавать `projectRoot` целевого проекта
+- если `projectRoot` не передан, используется автоопределение (env/cwd/last active)
+
+### Как конкретизировать путь к проекту
+
+Есть 3 способа:
+
+1. На уровне запуска сервера:
+
+```bash
+python -m uv run obsidian-context-mcp server --project-root G:/work/project-a
+```
+
+2. Через переменную окружения:
+
+```bash
+set OBSIDIAN_CONTEXT_PROJECT_ROOT=G:/work/project-a
+pnpm mcp:start
+```
+
+3. В каждом вызове tool (рекомендуется для мультипроекта):
+
+```json
+{
+  "projectRoot": "G:/work/project-b",
+  "query": "архитектура аутентификации",
+  "topK": 10,
+  "mode": "hybrid"
+}
+```
+
+Приоритет определения `projectRoot`: `--project-root` → `OBSIDIAN_CONTEXT_PROJECT_ROOT` → roots клиента → cwd → last active project.
 
 ## Основные MCP tools
 

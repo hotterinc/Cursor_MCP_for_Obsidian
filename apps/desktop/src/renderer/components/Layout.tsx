@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
 import { useAppStore } from '@/state/store'
 
 const links = [
@@ -38,6 +40,14 @@ export function Sidebar() {
 
 export function StatusBar() {
   const project = useAppStore((s) => s.project)
+  const setProject = useAppStore((s) => s.setProject)
+
+  useEffect(() => {
+    api.getCurrentProject().then(setProject).catch(() => {
+      /* sidecar may still be starting */
+    })
+  }, [setProject])
+
   return (
     <header className="h-10 border-b border-[hsl(var(--border))] flex items-center px-4 gap-4 text-xs">
       <span className="font-medium">{project?.projectName ?? 'No project'}</span>

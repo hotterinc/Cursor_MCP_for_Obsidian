@@ -1,7 +1,8 @@
 import { app, BrowserWindow } from 'electron'
 import { readFileSync, existsSync } from 'fs'
 import { getOpenRequestPath } from './deepLink'
-import { setProjectRoot } from './ipc'
+import { setProjectRoot, getProjectRoot } from './ipc'
+import { sidecar } from './pythonSidecar'
 import { log } from './logger'
 
 export function setupSingleInstance(mainWindow: BrowserWindow): void {
@@ -11,12 +12,20 @@ export function setupSingleInstance(mainWindow: BrowserWindow): void {
     return
   }
 
-  app.on('second-instance', (_event, argv) => {
+  app.on('second-instance', async (_event, argv) => {
     const rootFlag = argv.findIndex((a) => a === '--project-root')
     if (rootFlag >= 0 && argv[rootFlag + 1]) {
       setProjectRoot(argv[rootFlag + 1])
     }
     checkOpenRequest()
+    const root = getProjectRoot()
+    if (root) {
+      try {
+        await sidecar.start(root)
+      } catch (e) {
+        log(`Failed to restart sidecar: ${e}`)
+      }
+    }
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
   })

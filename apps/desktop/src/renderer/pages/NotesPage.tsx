@@ -1,80 +1,102 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { useAppStore } from '@/state/store'
+import { ErrorBanner, formatIpcError, VaultGate } from '@/components/VaultGate'
 import { Btn } from './ProjectPage'
 
 export function NotesPage() {
+  const { project, setProject } = useAppStore()
   const [notes, setNotes] = useState<Array<Record<string, unknown>>>([])
   const [filter, setFilter] = useState('')
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
   const [preview, setPreview] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.getCurrentProject().then(setProject).catch(() => {})
+  }, [setProject])
 
   const load = async () => {
-    const data = await api.listNotes({ query: filter || undefined })
-    setNotes((data.notes as Array<Record<string, unknown>>) ?? [])
+    try {
+      setError(null)
+      const data = await api.listNotes({ projectRoot: project?.projectRoot, query: filter || undefined })
+      setNotes((data.notes as Array<Record<string, unknown>>) ?? [])
+    } catch (e) {
+      setError(formatIpcError(e))
+      setNotes([])
+    }
   }
 
   useEffect(() => {
-    load()
-  }, [])
+    if (project?.configured) load()
+  }, [project?.configured, project?.projectRoot])
 
   const read = async (rel: string) => {
-    const note = await api.readNote({ relativePath: rel })
-    setSelected(note)
-    setPreview(String(note.content ?? '').slice(0, 2000))
+    try {
+      setError(null)
+      const note = await api.readNote({ projectRoot: project?.projectRoot, relativePath: rel })
+      setSelected(note)
+      setPreview(String(note.content ?? '').slice(0, 2000))
+    } catch (e) {
+      setError(formatIpcError(e))
+    }
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-lg font-semibold">Notes</h1>
-      <div className="flex gap-2">
-        <input
-          className="flex-1 px-2 py-1.5 rounded bg-[hsl(var(--accent))] border border-[hsl(var(--border))] text-sm"
-          placeholder="Filter..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        <Btn onClick={load}>Search</Btn>
-      </div>
-      <div className="grid grid-cols-2 gap-4 min-h-[400px]">
-        <div className="border border-[hsl(var(--border))] rounded overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-[hsl(var(--muted))] sticky top-0">
-              <tr>
-                <th className="text-left p-2">Title</th>
-                <th className="text-left p-2">Path</th>
-              </tr>
-            </thead>
-            <tbody>
-              {notes.map((n) => (
-                <tr
-                  key={String(n.relative_path)}
-                  className="border-t border-[hsl(var(--border))] hover:bg-[hsl(var(--accent))] cursor-pointer"
-                  onClick={() => read(String(n.relative_path))}
-                >
-                  <td className="p-2">{String(n.title ?? n.relative_path)}</td>
-                  <td className="p-2 text-xs text-slate-400">{String(n.relative_path)}</td>
+    <VaultGate>
+      <div className="space-y-4">
+        <h1 className="text-lg font-semibold">Notes</h1>
+        {error && <ErrorBanner message={error} />}
+        <div className="flex gap-2">
+          <input
+            className="flex-1 px-2 py-1.5 rounded bg-[hsl(var(--accent))] border border-[hsl(var(--border))] text-sm"
+            placeholder="Filter..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <Btn onClick={load}>Search</Btn>
+        </div>
+        <div className="grid grid-cols-2 gap-4 min-h-[400px]">
+          <div className="border border-[hsl(var(--border))] rounded overflow-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-[hsl(var(--muted))] sticky top-0">
+                <tr>
+                  <th className="text-left p-2">Title</th>
+                  <th className="text-left p-2">Path</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="border border-[hsl(var(--border))] rounded p-3 overflow-auto text-sm">
-          {selected ? (
-            <>
-              <div className="font-medium mb-2">{String(selected.relative_path)}</div>
-              <pre className="whitespace-pre-wrap text-xs text-slate-300">{preview}</pre>
-              <Btn
-                variant="secondary"
-                onClick={() => api.openNoteInExternalApp({ relativePath: String(selected.relative_path) })}
-              >
-                Open externally
-              </Btn>
-            </>
-          ) : (
-            <span className="text-slate-500">Select a note</span>
-          )}
+              </thead>
+              <tbody>
+                {notes.map((n) => (
+                  <tr
+                    key={String(n.relative_path)}
+                    className="border-t border-[hsl(var(--border))] hover:bg-[hsl(var(--accent))] cursor-pointer"
+                    onClick={() => read(String(n.relative_path))}
+                  >
+                    <td className="p-2">{String(n.title ?? n.relative_path)}</td>
+                    <td className="p-2 text-xs text-slate-400">{String(n.relative_path)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="border border-[hsl(var(--border))] rounded p-3 overflow-auto text-sm">
+            {selected ? (
+              <>
+                <div className="font-medium mb-2">{String(selected.relative_path)}</div>
+                <pre className="whitespace-pre-wrap text-xs text-slate-300">{preview}</pre>
+                <Btn
+                  variant="secondary"
+                  onClick={() => api.openNoteInExternalApp({ relativePath: String(selected.relative_path) })}
+                >
+                  Open externally
+                </Btn>
+              </>
+            ) : (
+              <span className="text-slate-500">Select a note</span>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </VaultGate>
   )
 }

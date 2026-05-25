@@ -5,6 +5,7 @@
   "description": "Local MCP server connecting Cursor projects to Obsidian documentation",
   "onlyBuiltDependencies": ["electron", "esbuild"],
   "scripts": {
+    "mcp:start": "cd python && python -m uv run obsidian-context-mcp server",
     "dev:desktop": "pnpm --filter @obsidian-context/desktop dev",
     "build:desktop": "pnpm --filter @obsidian-context/desktop build",
     "package:desktop": "pnpm --filter @obsidian-context/desktop package",

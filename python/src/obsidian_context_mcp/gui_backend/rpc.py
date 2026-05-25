@@ -10,6 +10,14 @@ from typing import Any
 from obsidian_context_mcp.gui_backend.schemas import RpcEvent, RpcRequest, RpcResponse
 
 
+def configure_stdio_utf8() -> None:
+    """Electron sends UTF-8 JSON; default Windows stdin may be cp1251."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 class JsonRpcServer:
     def __init__(self) -> None:
         self._handlers: dict[str, Callable[[dict], Any]] = {}
@@ -24,13 +32,13 @@ class JsonRpcServer:
     def emit_event(self, method: str, params: dict) -> None:
         event = RpcEvent(method=method, params=params)
         line = event.model_dump_json() + "\n"
-        sys.stdout.write(line)
-        sys.stdout.flush()
+        sys.stdout.buffer.write(line.encode("utf-8"))
+        sys.stdout.buffer.flush()
 
     def _write_response(self, response: RpcResponse) -> None:
         line = response.model_dump_json(exclude_none=True) + "\n"
-        sys.stdout.write(line)
-        sys.stdout.flush()
+        sys.stdout.buffer.write(line.encode("utf-8"))
+        sys.stdout.buffer.flush()
 
     def handle_request(self, request: RpcRequest) -> None:
         handler = self._handlers.get(request.method)
@@ -54,8 +62,9 @@ class JsonRpcServer:
             )
 
     def serve_stdio(self) -> None:
-        for line in sys.stdin:
-            line = line.strip()
+        configure_stdio_utf8()
+        for raw in sys.stdin.buffer:
+            line = raw.decode("utf-8").strip()
             if not line:
                 continue
             try:

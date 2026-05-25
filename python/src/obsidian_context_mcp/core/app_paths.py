@@ -8,11 +8,31 @@ from pathlib import Path
 
 import platformdirs
 
-from obsidian_context_mcp.shared.constants import APP_NAME
+from obsidian_context_mcp.shared.constants import APP_NAME, ENV_DATA_DIR
+
+
+def _is_windows_store_sandbox(path: Path) -> bool:
+    parts = {p.lower() for p in path.parts}
+    return "packages" in parts and "localcache" in parts
+
+
+def _canonical_app_data_dir() -> Path:
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            return Path(local) / APP_NAME / APP_NAME
+    if os.name == "posix" and (Path.home() / "Library").exists():
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    return Path.home() / ".local" / "share" / APP_NAME
 
 
 def get_app_data_dir() -> Path:
-    path = Path(platformdirs.user_data_dir(APP_NAME))
+    override = os.environ.get(ENV_DATA_DIR)
+    if override:
+        path = Path(override)
+    else:
+        platform_path = Path(platformdirs.user_data_dir(APP_NAME))
+        path = _canonical_app_data_dir() if _is_windows_store_sandbox(platform_path) else platform_path
     path.mkdir(parents=True, exist_ok=True)
     return path
 
