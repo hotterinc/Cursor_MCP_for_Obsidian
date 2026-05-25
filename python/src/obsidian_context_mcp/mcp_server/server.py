@@ -7,7 +7,7 @@ from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Prompt, PromptMessage, Resource, TextContent, Tool
+from mcp.types import GetPromptResult, Prompt, PromptMessage, Resource, TextContent, Tool
 
 from obsidian_context_mcp.core.logging import get_logger, setup_logging
 from obsidian_context_mcp.core.project import get_project_context
@@ -97,15 +97,14 @@ async def list_prompts() -> list[Prompt]:
 
 
 @server.get_prompt()
-async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> Any:
+async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> GetPromptResult:
     content_map = {
         "use_project_docs": prompts.USE_PROJECT_DOCS,
         "update_project_docs": prompts.UPDATE_PROJECT_DOCS,
         "summarize_project_docs": prompts.SUMMARIZE_PROJECT_DOCS,
     }
     text = content_map.get(name, "")
-    return Prompt(
-        name=name,
+    return GetPromptResult(
         description=name,
         messages=[PromptMessage(role="user", content=TextContent(type="text", text=text))],
     )

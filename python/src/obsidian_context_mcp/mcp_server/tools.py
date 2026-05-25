@@ -122,7 +122,14 @@ async def docs_get_context_pack(args: dict[str, Any]) -> dict[str, Any]:
 async def docs_read_note(args: dict[str, Any]) -> dict[str, Any]:
     ctx = _ctx(args.get("projectRoot"))
     editor = Editor(ctx)
-    return editor.read_note(args["relativePath"])
+    note = editor.read_note(args["relativePath"])
+    return {
+        "relativePath": note["relative_path"],
+        "sha256": note["sha256"],
+        "content": note["content"],
+        "frontmatter": note["frontmatter"],
+        "headings": note["headings"],
+    }
 
 
 async def docs_list_notes(args: dict[str, Any]) -> dict[str, Any]:
@@ -148,7 +155,13 @@ async def docs_patch_note(args: dict[str, Any]) -> dict[str, Any]:
         dry_run=args.get("dryRun", False),
         create_backup_flag=args.get("createBackup", True),
     )
-    return result.__dict__
+    return {
+        "relativePath": result.relative_path,
+        "oldSha256": result.old_sha256,
+        "newSha256": result.new_sha256,
+        "backupPath": result.backup_path,
+        "dryRun": result.dry_run,
+    }
 
 
 async def docs_create_note(args: dict[str, Any]) -> dict[str, Any]:
@@ -160,7 +173,13 @@ async def docs_create_note(args: dict[str, Any]) -> dict[str, Any]:
         overwrite=args.get("overwrite", False),
         create_backup_flag=args.get("createBackup", True),
     )
-    return result.__dict__
+    return {
+        "relativePath": result.relative_path,
+        "oldSha256": result.old_sha256,
+        "newSha256": result.new_sha256,
+        "backupPath": result.backup_path,
+        "dryRun": result.dry_run,
+    }
 
 
 async def docs_delete_note(args: dict[str, Any]) -> dict[str, Any]:
@@ -171,7 +190,13 @@ async def docs_delete_note(args: dict[str, Any]) -> dict[str, Any]:
         args["expectedSha256"],
         create_backup_flag=args.get("createBackup", True),
     )
-    return result.__dict__
+    return {
+        "relativePath": result.relative_path,
+        "oldSha256": result.old_sha256,
+        "newSha256": result.new_sha256,
+        "backupPath": result.backup_path,
+        "dryRun": result.dry_run,
+    }
 
 
 async def docs_rename_note(args: dict[str, Any]) -> dict[str, Any]:
@@ -183,7 +208,13 @@ async def docs_rename_note(args: dict[str, Any]) -> dict[str, Any]:
         args["expectedSha256"],
         create_backup_flag=args.get("createBackup", True),
     )
-    return result.__dict__
+    return {
+        "relativePath": result.relative_path,
+        "oldSha256": result.old_sha256,
+        "newSha256": result.new_sha256,
+        "backupPath": result.backup_path,
+        "dryRun": result.dry_run,
+    }
 
 
 async def diagnostics_run(args: dict[str, Any]) -> dict[str, Any]:

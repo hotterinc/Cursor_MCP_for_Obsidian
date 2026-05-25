@@ -1,5 +1,7 @@
 # obsidian-context-mcp
 
+Russian documentation: [`README.ru.md`](README.ru.md)
+
 Local MCP server for **Cursor** that connects your Cursor project to an external **Obsidian** documentation vault. Indexes Markdown locally, builds a vector database, and gives Cursor agents searchable context plus safe editing of `.md` files.
 
 Everything runs **locally**. No cloud APIs by default. User Markdown never leaves the machine.

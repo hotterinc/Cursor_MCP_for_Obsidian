@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import difflib
 import os
 import re
 import uuid
@@ -85,11 +84,7 @@ class Editor:
 
         if mode == PatchMode.UNIFIED_DIFF:
             diff = patch["diff"]
-            text.splitlines(keepends=True)
-            result = list(difflib.restore(diff.splitlines(), 2))
-            if not result:
-                raise PatchError("Failed to apply unified diff")
-            return "".join(result)
+            return self._apply_unified_diff(text, diff)
 
         if mode == PatchMode.APPEND_SECTION:
             heading = patch["heading"]
@@ -112,6 +107,74 @@ class Editor:
             return text.rstrip() + sep + section
 
         raise PatchError(f"Unknown patch mode: {mode}")
+
+    @staticmethod
+    def _apply_unified_diff(original_text: str, unified_diff: str) -> str:
+        """Apply a unified diff to text in-memory.
+
+        This validates context/removed lines to prevent silent corruption.
+        """
+        original_lines = original_text.splitlines(keepends=True)
+        diff_lines = unified_diff.splitlines(keepends=True)
+        if not diff_lines:
+            raise PatchError("Unified diff is empty")
+
+        idx = 0
+        if diff_lines[0].startswith("--- "):
+            idx += 1
+            if idx < len(diff_lines) and diff_lines[idx].startswith("+++ "):
+                idx += 1
+
+        output: list[str] = []
+        src_pos = 0
+        hunk_re = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+        while idx < len(diff_lines):
+            header = diff_lines[idx]
+            match = hunk_re.match(header.rstrip("\n"))
+            if not match:
+                idx += 1
+                continue
+
+            start_old = int(match.group(1)) - 1
+            if start_old < src_pos:
+                raise PatchError("Overlapping hunks in unified diff")
+
+            output.extend(original_lines[src_pos:start_old])
+            src_pos = start_old
+            idx += 1
+
+            while idx < len(diff_lines):
+                line = diff_lines[idx]
+                if line.startswith("@@ "):
+                    break
+                if line.startswith("\\ No newline at end of file"):
+                    idx += 1
+                    continue
+                if not line:
+                    idx += 1
+                    continue
+
+                sign = line[0]
+                payload = line[1:]
+
+                if sign == " ":
+                    if src_pos >= len(original_lines) or original_lines[src_pos] != payload:
+                        raise PatchError("Unified diff context mismatch")
+                    output.append(original_lines[src_pos])
+                    src_pos += 1
+                elif sign == "-":
+                    if src_pos >= len(original_lines) or original_lines[src_pos] != payload:
+                        raise PatchError("Unified diff removal mismatch")
+                    src_pos += 1
+                elif sign == "+":
+                    output.append(payload)
+                else:
+                    raise PatchError(f"Invalid unified diff line prefix: {sign}")
+                idx += 1
+
+        output.extend(original_lines[src_pos:])
+        return "".join(output)
 
     def patch_note(
         self,

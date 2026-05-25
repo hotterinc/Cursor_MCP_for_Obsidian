@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 
 import pytest
@@ -23,10 +24,17 @@ def editor_ctx(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     project_root = tmp_path / "project"
     project_root.mkdir()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    for f in SAMPLE_VAULT.rglob("*.md"):
+        dest = vault / f.relative_to(SAMPLE_VAULT)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+
     store = ConfigStore.for_project_root(str(project_root))
     store.create_or_update(
         str(project_root),
-        vault_path=str(SAMPLE_VAULT),
+        vault_path=str(vault),
         write_access=True,
         embedding_provider="fake",
     )
@@ -72,3 +80,23 @@ def test_append_section_updates_file(editor_ctx, tmp_path):
     )
     assert result.new_sha256 != note["sha256"]
     assert result.backup_path is not None
+
+
+def test_unified_diff_patch_updates_file(editor_ctx):
+    note = editor_ctx.read_note("Setup.md")
+    updated = note["content"].replace("## Prerequisites", "## Requirements")
+    diff = "".join(
+        difflib.unified_diff(
+            note["content"].splitlines(keepends=True),
+            updated.splitlines(keepends=True),
+            fromfile="a/Setup.md",
+            tofile="b/Setup.md",
+        )
+    )
+    result = editor_ctx.patch_note(
+        "Setup.md",
+        note["sha256"],
+        PatchMode.UNIFIED_DIFF,
+        {"diff": diff},
+    )
+    assert result.new_sha256 != note["sha256"]

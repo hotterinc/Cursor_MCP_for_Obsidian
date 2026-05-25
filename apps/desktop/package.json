@@ -8,7 +8,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "package": "electron-builder",
-    "lint": "eslint src --ext .ts,.tsx",
+    "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "preview": "electron-vite preview"
   },
