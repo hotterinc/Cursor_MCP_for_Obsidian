@@ -7,6 +7,8 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from loguru import logger
+
 from obsidian_context_mcp.core.chunker import chunk_note
 from obsidian_context_mcp.core.embeddings import create_embedding_provider
 from obsidian_context_mcp.core.locks import ProjectLock
@@ -84,7 +86,9 @@ class Indexer:
             return
 
         texts = [c.text for c in chunks]
+        logger.info("Embedding {} chunks for {}", len(texts), relative_path)
         vectors = self.embedder.embed_texts(texts, is_query=False)
+        logger.info("Embedded {} vectors for {}", len(vectors), relative_path)
         metadatas = [
             {
                 "chunk_id": c.id,

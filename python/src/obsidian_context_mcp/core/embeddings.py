@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import math
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import httpx
 
-from obsidian_context_mcp.core.app_paths import get_project_models_dir
+from obsidian_context_mcp.core.app_paths import get_shared_models_cache_dir
+from obsidian_context_mcp.core.locks import RuntimeLock
+from obsidian_context_mcp.core.ml_runtime import configure_ml_runtime
 from obsidian_context_mcp.shared.types import ProjectConfig
+
+configure_ml_runtime()
 
 
 @dataclass
@@ -60,23 +65,51 @@ class SentenceTransformersEmbeddingProvider(EmbeddingProvider):
         self._model_name = model_name
         self._cache_dir = cache_dir
         self._model = None
+        self._encode_lock = threading.Lock()
 
     def _load_model(self):
         if self._model is None:
+            import torch
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self._model_name, cache_folder=self._cache_dir)
-            dim = self._model.get_sentence_embedding_dimension()
+            torch.set_num_threads(1)
+            self._model = SentenceTransformer(
+                self._model_name,
+                cache_folder=self._cache_dir,
+                device="cpu",
+            )
+            dim_fn = getattr(self._model, "get_embedding_dimension", None)
+            if dim_fn is None:
+                dim_fn = self._model.get_sentence_embedding_dimension
+            dim = dim_fn()
             if dim:
                 self.dimensions = dim
         return self._model
 
     def embed_texts(self, texts: list[str], *, is_query: bool = False) -> list[list[float]]:
+        if not texts:
+            return []
+
+        import torch
+
         model = self._load_model()
         prefix = "query: " if is_query else "passage: "
         prefixed = [prefix + t for t in texts]
-        vectors = model.encode(prefixed, show_progress_bar=False, normalize_embeddings=True)
-        return [v.tolist() for v in vectors]
+
+        with self._encode_lock, RuntimeLock("embedding", timeout=600), torch.inference_mode():
+            vectors = model.encode(
+                prefixed,
+                batch_size=16,
+                show_progress_bar=False,
+                normalize_embeddings=True,
+                convert_to_numpy=True,
+                convert_to_tensor=False,
+                device="cpu",
+            )
+
+        if hasattr(vectors, "tolist") and getattr(vectors, "ndim", 0) == 2:
+            return vectors.tolist()
+        return [v.tolist() if hasattr(v, "tolist") else list(v) for v in vectors]
 
     def healthcheck(self) -> HealthResult:
         try:
@@ -125,5 +158,5 @@ def create_embedding_provider(config: ProjectConfig, project_id: str) -> Embeddi
         return FakeEmbeddingProvider()
     if provider == "ollama":
         return OllamaLocalEmbeddingProvider(config.embedding_model)
-    cache_dir = str(get_project_models_dir(project_id))
+    cache_dir = str(get_shared_models_cache_dir())
     return SentenceTransformersEmbeddingProvider(config.embedding_model, cache_dir)

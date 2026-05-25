@@ -10,6 +10,7 @@ import typer
 from obsidian_context_mcp.core.diagnostics import run_diagnostics_for_root
 from obsidian_context_mcp.core.indexer import Indexer
 from obsidian_context_mcp.core.logging import setup_logging
+from obsidian_context_mcp.core.ml_runtime import configure_ml_runtime
 from obsidian_context_mcp.core.project import detect_project_context
 from obsidian_context_mcp.core.vault import validate_vault_path
 from obsidian_context_mcp.gui_backend.server import run_gui_backend
@@ -26,11 +27,13 @@ def _require_ctx(project_root: str | None):
 
 
 def server(project_root: str | None = typer.Option(None, "--project-root")) -> None:
+    configure_ml_runtime()
     setup_logging(level="INFO")
     asyncio.run(run_mcp_server(project_root))
 
 
 def gui_backend(project_root: str = typer.Option(..., "--project-root")) -> None:
+    configure_ml_runtime()
     setup_logging(level="INFO")
     run_gui_backend(project_root)
 

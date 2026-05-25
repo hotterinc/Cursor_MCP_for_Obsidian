@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mcp.server import Server
@@ -34,6 +36,11 @@ TOOL_HANDLERS = {
 }
 
 
+def _run_tool_handler(handler: Callable[..., Awaitable[Any]], args: dict[str, Any]) -> Any:
+    """Run tool handler off the MCP event loop (embedding/search can block for minutes)."""
+    return asyncio.run(handler(args))
+
+
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     return [
@@ -49,7 +56,7 @@ async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextCon
     if not handler:
         return [TextContent(type="text", text=json.dumps({"error": f"unknown tool: {name}"}))]
     try:
-        result = await handler(args)
+        result = await asyncio.to_thread(_run_tool_handler, handler, args)
         return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except Exception as exc:
         logger.exception("Tool error: {}", name)

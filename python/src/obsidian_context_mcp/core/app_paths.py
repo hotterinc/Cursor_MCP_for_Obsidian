@@ -104,6 +104,13 @@ def get_project_locks_dir(project_id: str) -> Path:
     return path
 
 
+def get_shared_models_cache_dir() -> Path:
+    """Single HF cache for all projects (avoids per-project re-download and lock fights)."""
+    path = get_app_data_dir() / "models-cache"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_project_models_dir(project_id: str) -> Path:
     path = get_project_dir(project_id) / "models"
     path.mkdir(parents=True, exist_ok=True)

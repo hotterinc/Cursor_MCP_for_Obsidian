@@ -42,7 +42,12 @@ export class PythonSidecar extends EventEmitter {
           env: {
             ...process.env,
             PYTHONUNBUFFERED: '1',
-            OBSIDIAN_CONTEXT_DATA_DIR: getAppDataDir()
+            OBSIDIAN_CONTEXT_DATA_DIR: getAppDataDir(),
+            TOKENIZERS_PARALLELISM: 'false',
+            OMP_NUM_THREADS: '1',
+            MKL_NUM_THREADS: '1',
+            HF_HUB_DISABLE_PROGRESS_BARS: '1',
+        HF_HUB_DISABLE_SYMLINKS_WARNING: '1'
           }
         }
       )

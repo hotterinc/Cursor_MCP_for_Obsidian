@@ -57,6 +57,7 @@ class IndexQueue:
         self._thread = threading.Thread(target=_run, daemon=True)
         self._thread.start()
         placeholder = IndexProgress(job_id="pending", status=JobStatus.RUNNING)
+        self._jobs[placeholder.job_id] = placeholder
         return placeholder
 
     def cancel(self, job_id: str) -> bool:

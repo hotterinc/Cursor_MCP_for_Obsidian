@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from obsidian_context_mcp.gui_backend.schemas import RpcEvent, RpcRequest, RpcResponse
@@ -63,15 +64,16 @@ class JsonRpcServer:
 
     def serve_stdio(self) -> None:
         configure_stdio_utf8()
-        for raw in sys.stdin.buffer:
-            line = raw.decode("utf-8").strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                request = RpcRequest.model_validate(data)
-                self.handle_request(request)
-            except Exception as exc:
-                self._write_response(
-                    RpcResponse(error={"code": -32700, "message": f"Parse error: {exc}"})
-                )
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="gui-rpc") as pool:
+            for raw in sys.stdin.buffer:
+                line = raw.decode("utf-8").strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    request = RpcRequest.model_validate(data)
+                    pool.submit(self.handle_request, request)
+                except Exception as exc:
+                    self._write_response(
+                        RpcResponse(error={"code": -32700, "message": f"Parse error: {exc}"})
+                    )
