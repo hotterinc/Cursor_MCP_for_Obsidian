@@ -151,6 +151,7 @@ class ContextPack(BaseModel):
 class IndexProgress(BaseModel):
     job_id: str
     status: JobStatus
+    total_files: int = 0
     files_scanned: int = 0
     files_indexed: int = 0
     files_skipped: int = 0

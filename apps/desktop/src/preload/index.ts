@@ -28,7 +28,17 @@ const obsidianContext = {
   openAppDataFolder: (projectRoot?: string) => ipcRenderer.invoke('obsidian:openAppDataFolder', { projectRoot }),
   openNoteInExternalApp: (input: Record<string, unknown>) => ipcRenderer.invoke('obsidian:openNoteInExternalApp', input),
   getSettings: (projectRoot?: string) => ipcRenderer.invoke('obsidian:getSettings', { projectRoot }),
-  updateSettings: (input: Record<string, unknown>) => ipcRenderer.invoke('obsidian:updateSettings', input)
+  updateSettings: (input: Record<string, unknown>) => ipcRenderer.invoke('obsidian:updateSettings', input),
+  onSidecarEvent: (callback: (payload: { method: string; params: Record<string, unknown> }) => void) => {
+    const listener = (_: unknown, payload: { method: string; params: Record<string, unknown> }) => callback(payload)
+    ipcRenderer.on('obsidian:sidecar-event', listener)
+    return () => ipcRenderer.removeListener('obsidian:sidecar-event', listener)
+  },
+  onSidecarLog: (callback: (line: string) => void) => {
+    const listener = (_: unknown, line: string) => callback(line)
+    ipcRenderer.on('obsidian:sidecar-log', listener)
+    return () => ipcRenderer.removeListener('obsidian:sidecar-log', listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('obsidianContext', obsidianContext)

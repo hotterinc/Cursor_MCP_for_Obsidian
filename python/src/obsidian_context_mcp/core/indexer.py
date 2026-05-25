@@ -136,7 +136,9 @@ class Indexer:
             exclude=self.config.exclude,
             docs_subfolder=self.config.docs_subfolder,
         )
+        progress.total_files = len(md_files)
         existing = {r["relative_path"]: r for r in self.db.get_all_files()}
+        self._emit(progress_callback, progress)
 
         for rel in md_files:
             if self._cancel_flag:
@@ -162,14 +164,17 @@ class Indexer:
                 ):
                     stats["files_skipped"] += 1
                     progress.files_skipped = stats["files_skipped"]
+                    self._emit(progress_callback, progress)
                     continue
 
                 self.index_file(rel)
                 stats["files_indexed"] += 1
                 progress.files_indexed = stats["files_indexed"]
+                self._emit(progress_callback, progress)
             except Exception:
                 stats["files_failed"] += 1
                 progress.files_failed = stats["files_failed"]
+                self._emit(progress_callback, progress)
 
         # Cleanup deleted files
         current_set = set(md_files)

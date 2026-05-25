@@ -19,7 +19,7 @@ type PendingRequest = {
 
 export class PythonSidecar extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null
-  private buffer = ''
+  private stdoutBuffer = Buffer.alloc(0)
   private requestId = 0
   private pending = new Map<number, PendingRequest>()
   private projectRoot: string | null = null
@@ -53,8 +53,14 @@ export class PythonSidecar extends EventEmitter {
       })
     }
 
-    this.proc.stdout.on('data', (chunk: Buffer) => this.handleStdout(chunk.toString()))
-    this.proc.stderr.on('data', (chunk: Buffer) => log(`[python stderr] ${chunk.toString().trim()}`))
+    this.proc.stdout.on('data', (chunk: Buffer) => this.handleStdout(chunk))
+    this.proc.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf-8')
+      for (const line of text.split(/\r?\n/)) {
+        if (line.trim()) this.emit('log', line.trim())
+      }
+      log(`[python stderr] ${text.trim()}`)
+    })
     this.proc.on('exit', (code) => {
       log(`Python sidecar exited with code ${code}`)
       this.proc = null
@@ -72,29 +78,35 @@ export class PythonSidecar extends EventEmitter {
     this.pending.clear()
   }
 
-  private handleStdout(data: string): void {
-    this.buffer += data
-    const lines = this.buffer.split('\n')
-    this.buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (!line.trim()) continue
-      try {
-        const msg = JSON.parse(line) as JsonRpcResponse & { method?: string; params?: Record<string, unknown> }
-        if (msg.method) {
-          this.emit('event', msg.method, msg.params ?? {})
-          continue
-        }
-        if (msg.id !== undefined && msg.id !== null) {
-          const pending = this.pending.get(Number(msg.id))
-          if (pending) {
-            this.pending.delete(Number(msg.id))
-            if (msg.error) pending.reject(new Error(msg.error.message))
-            else pending.resolve(msg.result ?? {})
-          }
-        }
-      } catch {
-        log(`Failed to parse JSON-RPC line: ${line}`)
+  private handleStdout(chunk: Buffer): void {
+    this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk])
+    let newline = this.stdoutBuffer.indexOf(0x0a)
+    while (newline !== -1) {
+      const lineBuf = this.stdoutBuffer.subarray(0, newline)
+      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1)
+      const line = lineBuf.toString('utf-8').trim()
+      if (line) this.parseStdoutLine(line)
+      newline = this.stdoutBuffer.indexOf(0x0a)
+    }
+  }
+
+  private parseStdoutLine(line: string): void {
+    try {
+      const msg = JSON.parse(line) as JsonRpcResponse & { method?: string; params?: Record<string, unknown> }
+      if (msg.method) {
+        this.emit('event', msg.method, msg.params ?? {})
+        return
       }
+      if (msg.id !== undefined && msg.id !== null) {
+        const pending = this.pending.get(Number(msg.id))
+        if (pending) {
+          this.pending.delete(Number(msg.id))
+          if (msg.error) pending.reject(new Error(msg.error.message))
+          else pending.resolve(msg.result ?? {})
+        }
+      }
+    } catch {
+      log(`Failed to parse JSON-RPC line: ${line}`)
     }
   }
 

@@ -6,6 +6,7 @@ import { checkOpenRequest, parseCliProjectRoot, setupSingleInstance } from './ap
 import { readLastActiveProjectRoot } from './deepLink'
 import { sidecar } from './pythonSidecar'
 import { log } from './logger'
+import { setupSidecarBroadcast } from './sidecarBridge'
 
 async function bootstrapProjectRoot(): Promise<string | null> {
   const cliRoot = parseCliProjectRoot(process.argv)
@@ -24,6 +25,7 @@ app.whenReady().then(async () => {
   const root = await bootstrapProjectRoot()
 
   const mainWindow = createMainWindow()
+  setupSidecarBroadcast(mainWindow)
   setupSingleInstance(mainWindow)
   createTray(mainWindow)
 
