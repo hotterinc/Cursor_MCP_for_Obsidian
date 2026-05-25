@@ -1,0 +1,1 @@
+# Cursor_MCP_for_Obsidian
