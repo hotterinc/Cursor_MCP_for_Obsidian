@@ -17,17 +17,27 @@ hiddenimports = [
 
 hiddenimports += collect_submodules("obsidian_context_mcp")
 hiddenimports += collect_submodules("chromadb")
+hiddenimports += collect_submodules("llama_cpp")
 
 datas: list = []
 binaries: list = []
 
-for pkg in ("numpy", "chromadb", "sentence_transformers", "sklearn", "onnxruntime", "tokenizers"):
+for pkg in (
+    "numpy",
+    "chromadb",
+    "sentence_transformers",
+    "sklearn",
+    "onnxruntime",
+    "tokenizers",
+    "llama_cpp",
+):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas
     binaries += pkg_binaries
     hiddenimports += pkg_hidden
 
 binaries += collect_dynamic_libs("numpy")
+binaries += collect_dynamic_libs("llama_cpp")
 
 a = Analysis(
     ["src/obsidian_context_mcp/__main__.py"],
@@ -37,7 +47,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=["pyinstaller_runtime_llama.py"],
     excludes=[],
     noarchive=False,
     optimize=0,
