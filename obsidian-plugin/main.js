@@ -218,6 +218,18 @@ function isPidAlive(pid) {
     return false;
   }
 }
+function clearMacQuarantine(binaryPath) {
+  if (process.platform !== "darwin" || !fs2.existsSync(binaryPath)) return;
+  try {
+    const probe = (0, import_child_process.spawnSync)("xattr", ["-p", "com.apple.quarantine", binaryPath], {
+      encoding: "utf-8"
+    });
+    if (probe.status === 0) {
+      (0, import_child_process.spawnSync)("xattr", ["-d", "com.apple.quarantine", binaryPath]);
+    }
+  } catch {
+  }
+}
 function unlinkIfExists(filePath) {
   try {
     if (fs2.existsSync(filePath)) {
@@ -344,6 +356,7 @@ var SidecarManager = class {
         reject(err);
       };
       const command = resolveSidecarCommand(this.pluginDir, this.pythonCommand);
+      clearMacQuarantine(command);
       try {
         this.process = (0, import_child_process.spawn)(
           command,

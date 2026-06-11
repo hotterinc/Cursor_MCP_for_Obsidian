@@ -1,4 +1,4 @@
-import { spawn, ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, spawnSync, ChildProcessWithoutNullStreams } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { requestUrl } from "obsidian";
@@ -26,6 +26,20 @@ function isPidAlive(pid: number): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+function clearMacQuarantine(binaryPath: string): void {
+  if (process.platform !== "darwin" || !fs.existsSync(binaryPath)) return;
+  try {
+    const probe = spawnSync("xattr", ["-p", "com.apple.quarantine", binaryPath], {
+      encoding: "utf-8",
+    });
+    if (probe.status === 0) {
+      spawnSync("xattr", ["-d", "com.apple.quarantine", binaryPath]);
+    }
+  } catch {
+    /* ignore */
   }
 }
 
@@ -189,6 +203,7 @@ export class SidecarManager {
       };
 
       const command = resolveSidecarCommand(this.pluginDir, this.pythonCommand);
+      clearMacQuarantine(command);
 
       try {
         this.process = spawn(

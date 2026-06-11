@@ -28,6 +28,7 @@ obsidian-plugin/server/
 python/build/
 python/dist/
 python/*.spec
+!python/obsidian-context-mcp.spec
 
 # Local app data (never commit)
 .obsidian-context-mcp/

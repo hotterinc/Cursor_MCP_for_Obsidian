@@ -19,14 +19,7 @@ fi
 cd "$PY_DIR"
 "$PYTHON" -m pip install -q pyinstaller
 
-"$PYTHON" -m PyInstaller --noconfirm --onefile --name obsidian-context-mcp \
-  --paths src \
-  --hidden-import obsidian_context_mcp \
-  --hidden-import uvicorn \
-  --hidden-import starlette.routing \
-  --hidden-import mcp.server.sse \
-  --collect-submodules obsidian_context_mcp \
-  src/obsidian_context_mcp/__main__.py
+"$PYTHON" -m PyInstaller --noconfirm obsidian-context-mcp.spec
 
 mkdir -p "$OUT_DIR"
 if [[ -f dist/obsidian-context-mcp ]]; then
