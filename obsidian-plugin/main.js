@@ -239,6 +239,20 @@ function unlinkIfExists(filePath) {
   } catch {
   }
 }
+function findListenerPids(port) {
+  if (port <= 0 || process.platform === "win32") return [];
+  try {
+    const res = (0, import_child_process.spawnSync)(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { encoding: "utf-8" }
+    );
+    if (res.status !== 0 || !res.stdout.trim()) return [];
+    return res.stdout.trim().split("\n").map((s) => Number.parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n > 0);
+  } catch {
+    return [];
+  }
+}
 function logVaultServerLine(text, stream) {
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -285,6 +299,11 @@ var SidecarManager = class {
     const runtime = this.readRuntime();
     if (runtime?.pid) pids.add(runtime.pid);
     if (this.process?.pid) pids.add(this.process.pid);
+    if (this.serverPort > 0) {
+      for (const pid of findListenerPids(this.serverPort)) {
+        pids.add(pid);
+      }
+    }
     return [...pids];
   }
   async terminatePid(pid, timeoutMs = 5e3) {
@@ -328,8 +347,11 @@ var SidecarManager = class {
       this.ownsProcess = false;
       return existing;
     }
+    const portBlocked = this.serverPort > 0 && findListenerPids(this.serverPort).length > 0;
     const lockPid = this.readLockPid();
-    if (lockPid && isPidAlive(lockPid)) {
+    const staleLock = lockPid !== null && isPidAlive(lockPid);
+    const staleRuntime = existing !== null && !await this.isHealthy(existing);
+    if (portBlocked || staleLock || staleRuntime) {
       await this.clearServerState();
     } else {
       unlinkIfExists(this.lockPath);
@@ -423,12 +445,7 @@ var SidecarManager = class {
     });
   }
   async stop() {
-    if (this.process && this.ownsProcess) {
-      await this.terminatePid(this.process.pid ?? 0);
-      this.process = null;
-      this.ownsProcess = false;
-      unlinkIfExists(this.runtimePath);
-    }
+    await this.clearServerState();
   }
   readRuntime() {
     if (!fs2.existsSync(this.runtimePath)) return null;
@@ -453,6 +470,21 @@ var SidecarManager = class {
       this.ownsProcess = false;
       this.process = null;
       return runtime;
+    }
+    if (this.serverPort > 0 && findListenerPids(this.serverPort).length > 0) {
+      const orphan = {
+        port: this.serverPort,
+        host: "127.0.0.1",
+        pid: findListenerPids(this.serverPort)[0] ?? 0,
+        status: "running",
+        startedAt: "",
+        vault_id: ""
+      };
+      if (await this.isHealthy(orphan)) {
+        this.ownsProcess = false;
+        this.process = null;
+        return orphan;
+      }
     }
     return null;
   }
