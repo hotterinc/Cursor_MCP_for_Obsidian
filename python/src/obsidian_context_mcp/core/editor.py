@@ -11,16 +11,18 @@ from typing import Any
 
 from obsidian_context_mcp.core.backups import create_backup
 from obsidian_context_mcp.core.errors import HashMismatchError, PatchError
-from obsidian_context_mcp.core.indexer import Indexer
+from obsidian_context_mcp.core.indexer import ContextLike, Indexer
 from obsidian_context_mcp.core.markdown_parser import (
     compute_sha256,
     parse_markdown_text,
     read_file_text,
 )
 from obsidian_context_mcp.core.project import ProjectContext, compute_file_id
-from obsidian_context_mcp.core.security import SecurityBoundary
+from obsidian_context_mcp.core.security import ScopeBoundary, SecurityBoundary
 from obsidian_context_mcp.core.sqlite_store import SQLiteStore
-from obsidian_context_mcp.shared.types import PatchMode
+from obsidian_context_mcp.core.vault_context import VaultContext
+from obsidian_context_mcp.core.work_context import WorkContext
+from obsidian_context_mcp.shared.types import PatchMode, ProjectConfig
 
 
 @dataclass
@@ -33,12 +35,19 @@ class EditResult:
 
 
 class Editor:
-    def __init__(self, ctx: ProjectContext) -> None:
-        self.ctx = ctx
-        self.config = ctx.config_store.require_configured()
-        self.boundary = SecurityBoundary(self.config)
-        self.db = SQLiteStore(ctx.config_store.config_path.parent / "db.sqlite")
+    def __init__(self, ctx: ContextLike) -> None:
+        if isinstance(ctx, WorkContext):
+            self.work = ctx
+        elif isinstance(ctx, VaultContext):
+            self.work = ctx.work_context()
+        else:
+            self.work = WorkContext.from_project(ctx)
+        self.config: ProjectConfig = self.work.as_project_config()
+        base_boundary = SecurityBoundary(self.config)
+        self.boundary = ScopeBoundary(base_boundary, self.work.scope)
+        self.db = SQLiteStore(self.work.db_path)
         self.db.initialize()
+        self._ctx = ctx
 
     def read_note(self, relative_path: str) -> dict[str, Any]:
         resolved = self.boundary.resolve_read_path(relative_path)
@@ -197,20 +206,21 @@ class Editor:
         if create_backup_flag and self.config.backup_before_edit:
             backup_path = str(
                 create_backup(
-                    self.ctx.project_id,
+                    self.work.context_id,
                     relative_path=relative_path,
                     source_path=path,
                     operation="patch",
                     old_sha256=expected_sha256,
                     new_sha256=new_hash,
+                    backups_dir=self.work.backups_dir,
                 )
             )
 
         self._atomic_write(path, new_text, eol)
-        Indexer(self.ctx).index_file(relative_path)
+        Indexer(self._ctx).index_file(relative_path)
 
         file_id = compute_file_id(
-            self.ctx.project_id,
+            self.work.context_id,
             self.config.vault_real_path or "",
             relative_path,
         )
@@ -241,7 +251,7 @@ class Editor:
         eol = detect_eol(content)
         new_hash = compute_sha256(content)
         self._atomic_write(path, content, eol)
-        Indexer(self.ctx).index_file(resolved.relative_path)
+        Indexer(self._ctx).index_file(resolved.relative_path)
         return EditResult(resolved.relative_path, "", new_hash, None, False)
 
     def delete_note(
@@ -256,15 +266,16 @@ class Editor:
         if create_backup_flag and self.config.backup_before_edit:
             backup_path = str(
                 create_backup(
-                    self.ctx.project_id,
+                    self.work.context_id,
                     relative_path=relative_path,
                     source_path=path,
                     operation="delete",
                     old_sha256=expected_sha256,
+                    backups_dir=self.work.backups_dir,
                 )
             )
         path.unlink(missing_ok=True)
-        Indexer(self.ctx).index_file(relative_path)
+        Indexer(self._ctx).index_file(relative_path)
         return EditResult(relative_path, expected_sha256, "", backup_path, False)
 
     def rename_note(
@@ -287,8 +298,8 @@ class Editor:
             raise PatchError("Target path already exists")
         to_path.parent.mkdir(parents=True, exist_ok=True)
         from_path.rename(to_path)
-        Indexer(self.ctx).index_file(from_relative_path)
-        Indexer(self.ctx).index_file(to_resolved.relative_path)
+        Indexer(self._ctx).index_file(from_relative_path)
+        Indexer(self._ctx).index_file(to_resolved.relative_path)
         return EditResult(to_resolved.relative_path, expected_sha256, current_hash, None, False)
 
     @staticmethod

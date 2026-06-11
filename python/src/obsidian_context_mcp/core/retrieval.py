@@ -3,23 +3,50 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Union
 
 from obsidian_context_mcp.core.embeddings import create_embedding_provider
 from obsidian_context_mcp.core.project import ProjectContext
+from obsidian_context_mcp.core.scope_filter import path_in_scope
 from obsidian_context_mcp.core.sqlite_store import SQLiteStore
-from obsidian_context_mcp.core.vector_store import create_vector_store
+from obsidian_context_mcp.core.vault_context import VaultContext
+from obsidian_context_mcp.core.vault_paths import get_vault_chroma_path
+from obsidian_context_mcp.core.vector_store import create_vector_store, create_vector_store_at
+from obsidian_context_mcp.core.work_context import WorkContext
 from obsidian_context_mcp.shared.types import SearchMode, SearchResult
+
+ContextLike = Union[ProjectContext, VaultContext, WorkContext]
+
+
+def _normalize_ctx(ctx: ContextLike) -> WorkContext:
+    if isinstance(ctx, WorkContext):
+        return ctx
+    if isinstance(ctx, VaultContext):
+        return ctx.work_context()
+    return WorkContext.from_project(ctx)
 
 
 class Retriever:
-    def __init__(self, ctx: ProjectContext) -> None:
-        self.ctx = ctx
-        self.config = ctx.config_store.require_configured()
-        self.db = SQLiteStore(ctx.config_store.config_path.parent / "db.sqlite")
+    def __init__(self, ctx: ContextLike) -> None:
+        self.work = _normalize_ctx(ctx)
+        self.db = SQLiteStore(self.work.db_path)
         self.db.initialize()
-        self.vector_store = create_vector_store(ctx.project_id)
-        self.embedder = create_embedding_provider(self.config, ctx.project_id)
+        if isinstance(ctx, VaultContext):
+            self.vector_store = create_vector_store_at(
+                get_vault_chroma_path(ctx.data_dir),
+                self.work.context_id,
+            )
+        else:
+            self.vector_store = create_vector_store(self.work.context_id)
+        self.embedder = create_embedding_provider(
+            self.work.as_project_config(),
+            self.work.context_id,
+        )
+
+    def _in_scope(self, relative_path: str) -> bool:
+        if self.work.scope is None:
+            return True
+        return path_in_scope(relative_path, self.work.scope)
 
     def search(
         self,
@@ -32,12 +59,16 @@ class Retriever:
         semantic: list[dict] = []
         lexical: list[dict] = []
 
+        fetch_k = top_k * 4 if self.work.scope else top_k * 2
+
         if mode in (SearchMode.HYBRID, SearchMode.SEMANTIC):
             vector = self.embedder.embed_texts([query], is_query=True)[0]
-            semantic = self.vector_store.search(self.ctx.project_id, vector, top_k * 2, filters)
+            semantic = self.vector_store.search(
+                self.work.context_id, vector, fetch_k, filters
+            )
 
         if mode in (SearchMode.HYBRID, SearchMode.LEXICAL):
-            lexical = self.db.fts_search(query, limit=top_k * 2)
+            lexical = self.db.fts_search(query, limit=fetch_k)
 
         merged: dict[str, float] = {}
         for item in semantic:
@@ -45,14 +76,16 @@ class Retriever:
             merged[cid] = merged.get(cid, 0) + item["score"] * 0.6
         for item in lexical:
             cid = item["chunk_id"]
-            # BM25 returns negative scores (lower is better)
             lex_score = 1.0 / (1.0 + abs(item.get("score", 0)))
             merged[cid] = merged.get(cid, 0) + lex_score * 0.4
 
         results: list[SearchResult] = []
-        for cid, score in sorted(merged.items(), key=lambda x: x[1], reverse=True)[:top_k]:
+        for cid, score in sorted(merged.items(), key=lambda x: x[1], reverse=True):
             row = self.db.get_chunk_with_file(cid)
             if not row:
+                continue
+            rel_path = row["relative_path"]
+            if not self._in_scope(rel_path):
                 continue
             heading_path = json.loads(row.get("heading_path_json") or "[]")
             tags = json.loads(row.get("tags_json") or "[]")
@@ -67,8 +100,8 @@ class Retriever:
             results.append(
                 SearchResult(
                     chunk_id=cid,
-                    relative_path=row["relative_path"],
-                    title=row.get("file_title") or row["relative_path"],
+                    relative_path=rel_path,
+                    title=row.get("file_title") or rel_path,
                     heading_path=heading_path,
                     start_line=row["start_line"],
                     end_line=row["end_line"],
@@ -78,4 +111,6 @@ class Retriever:
                     links=links,
                 )
             )
+            if len(results) >= top_k:
+                break
         return results

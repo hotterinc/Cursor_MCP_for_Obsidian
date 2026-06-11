@@ -193,6 +193,21 @@ class SQLiteStore:
         self.conn.commit()
         return chunk_ids
 
+    def get_chunks_for_file(self, file_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT id, chunk_index, chunk_hash FROM chunks WHERE file_id = ? ORDER BY chunk_index",
+            (file_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_chunks_by_ids(self, chunk_ids: list[str]) -> None:
+        if not chunk_ids:
+            return
+        for cid in chunk_ids:
+            self.conn.execute("DELETE FROM chunks WHERE id = ?", (cid,))
+            self.conn.execute("DELETE FROM fts_chunks WHERE chunk_id = ?", (cid,))
+        self.conn.commit()
+
     def upsert_chunk(self, chunk: ChunkRecord, *, title: str, tags: list[str]) -> None:
         now = datetime.utcnow().isoformat() + "Z"
         heading_path = " > ".join(chunk.heading_path)

@@ -8,6 +8,78 @@ Everything runs **locally**. No cloud APIs by default. User Markdown never leave
 
 ## Architecture
 
+**Recommended (Obsidian-hosted):**
+
+- **Obsidian plugin** — starts `vault-server`, in-vault semantic search, Access Scope management
+- **Python vault-server** — HTTP MCP (SSE) + admin REST, one index per vault (SQLite + Chroma)
+- **Cursor** — connects via URL + Bearer scope token (does not spawn Python)
+
+```
+Obsidian Plugin ──spawn──► vault-server ──► SQLite + Chroma (per vault)
+Cursor Agent ──HTTP/SSE + scope token──► vault-server
+```
+
+**Legacy (deprecated):**
+
+- **MCP server (stdio)** — Cursor spawns `obsidian-context-mcp server`
+- **GUI backend + Electron desktop** — fallback without Obsidian plugin
+
+## Quick start (Obsidian plugin)
+
+1. Install the Python package:
+
+```bash
+cd python && uv sync --all-extras
+pip install -e .
+```
+
+2. Build the plugin and copy into your vault:
+
+```bash
+cd obsidian-plugin
+npm install && npm run build
+cp manifest.json main.js styles.css /path/to/vault/.obsidian/plugins/obsidian-context-mcp/
+```
+
+3. In Obsidian: enable **Obsidian Context MCP** under Community plugins
+4. The plugin auto-starts `vault-server` and runs incremental indexing
+5. Plugin settings → **Access scopes** → create a scope (e.g. `Projects/MyApp/**`)
+6. **Copy JSON** → paste into Cursor MCP settings
+
+## Cursor MCP configuration (recommended)
+
+```json
+{
+  "mcpServers": {
+    "obsidian-context": {
+      "url": "http://127.0.0.1:18432/sse",
+      "headers": {
+        "Authorization": "Bearer ocm_..."
+      }
+    }
+  }
+}
+```
+
+Port and token come from the plugin (Access scopes → Copy JSON). First tool in a session: `scope_get_info`, then `docs_get_context_pack` / `docs_search`.
+
+## Access Scopes
+
+The full vault is indexed, but each Cursor connection only sees allowed folders via bearer tokens stored in `scopes.json`.
+
+## vault-server (manual)
+
+```bash
+obsidian-context-mcp vault-server \
+  --vault-path /path/to/vault \
+  --data-dir /path/to/vault/.obsidian/plugins/obsidian-context-mcp/data
+```
+
+## Architecture (legacy)
+
+<details>
+<summary>Old stdio + Electron flow</summary>
+
 - **Python core** — config, security, indexing, retrieval, editing, watcher
 - **MCP server** — stdio process started by Cursor (`obsidian-context-mcp server`)
 - **GUI backend** — JSON-RPC over stdio sidecar for Electron
@@ -20,9 +92,11 @@ Electron GUI ──IPC──► Main ──JSON-RPC stdio──► GUI Backend �
                                                   └──► Obsidian vault (.md only)
 ```
 
-App data (config, index, backups) lives in OS app data via `platformdirs`, **not** in your git repo.
+</details>
 
-## Installation (development)
+App data (legacy project-centric index) lives in OS app data via `platformdirs`, **not** in your git repo.
+
+## Installation (development, legacy)
 
 ### Prerequisites
 
@@ -51,7 +125,9 @@ One-command MCP start:
 pnpm mcp:start
 ```
 
-## Cursor MCP configuration
+## Cursor MCP configuration (legacy stdio)
+
+> **Deprecated.** Use the Obsidian plugin + URL config (see above).
 
 **Development (multi-project mode, recommended)**:
 

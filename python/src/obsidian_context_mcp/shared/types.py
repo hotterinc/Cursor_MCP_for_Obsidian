@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class IndexStatus(str, Enum):
@@ -46,6 +46,55 @@ class DiagnosticStatus(str, Enum):
     WARN = "warn"
     FAIL = "fail"
     SKIP = "skip"
+
+
+class VaultConfig(BaseModel):
+    version: int = 1
+    vault_id: str
+    vault_path: str
+    vault_real_path: str
+    include: list[str] = Field(default_factory=lambda: ["**/*.md"])
+    exclude: list[str] = Field(
+        default_factory=lambda: [
+            ".obsidian/**",
+            ".git/**",
+            "node_modules/**",
+            ".trash/**",
+            "templates/**",
+        ]
+    )
+    embedding_provider: str = "sentence-transformers"
+    embedding_model: str = "intfloat/multilingual-e5-small"
+    watcher_enabled: bool = True
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+
+
+class AccessScope(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    name: str
+    include: list[str] = Field(default_factory=lambda: ["**/*.md"])
+    exclude: list[str] = Field(default_factory=list)
+    write_access: bool = Field(default=False, alias="writeAccess")
+    can_reindex: bool = Field(default=False, alias="canReindex")
+    token: str = ""
+
+
+class ScopesFile(BaseModel):
+    scopes: list[AccessScope] = Field(default_factory=list)
+
+
+class VaultRuntimeInfo(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    port: int
+    pid: int
+    host: str = "127.0.0.1"
+    status: str = "running"
+    started_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z", alias="startedAt")
+    vault_id: str = Field(default="", alias="vaultId")
 
 
 class ProjectConfig(BaseModel):
@@ -141,7 +190,7 @@ class ContextSource(BaseModel):
 
 
 class ContextPack(BaseModel):
-    project_id: str
+    project_id: str  # vault_id or legacy project_id
     task: str
     index_freshness: IndexStatus
     context: str

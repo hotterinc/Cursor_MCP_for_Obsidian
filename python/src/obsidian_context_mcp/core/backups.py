@@ -23,9 +23,11 @@ def create_backup(
     operation: str,
     old_sha256: str,
     new_sha256: str | None = None,
+    backups_dir: Path | None = None,
 ) -> Path:
     now = datetime.utcnow()
-    date_dir = get_project_backups_dir(project_id) / now.strftime("%Y-%m-%d")
+    base = backups_dir or get_project_backups_dir(project_id)
+    date_dir = base / now.strftime("%Y-%m-%d")
     date_dir.mkdir(parents=True, exist_ok=True)
     ts = now.strftime("%H%M%S_%f")
     encoded = encode_relative_path(relative_path)

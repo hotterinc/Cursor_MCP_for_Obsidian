@@ -5,19 +5,23 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import Union
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from obsidian_context_mcp.core.indexer import Indexer
 from obsidian_context_mcp.core.project import ProjectContext
+from obsidian_context_mcp.core.vault_context import VaultContext
 from obsidian_context_mcp.shared.constants import WATCHER_DEBOUNCE_MS_DEFAULT
+
+ContextLike = Union[ProjectContext, VaultContext]
 
 
 class VaultWatcherHandler(FileSystemEventHandler):
     def __init__(
         self,
-        ctx: ProjectContext,
+        ctx: ContextLike,
         *,
         debounce_ms: int = WATCHER_DEBOUNCE_MS_DEFAULT,
         on_event: Callable[[str, str], None] | None = None,
@@ -30,6 +34,12 @@ class VaultWatcherHandler(FileSystemEventHandler):
         self._lock = threading.Lock()
         self._indexer = Indexer(ctx)
 
+    def _vault_real_path(self) -> str:
+        if isinstance(self.ctx, VaultContext):
+            return self.ctx.vault_real_path
+        config = self.ctx.config
+        return config.vault_real_path if config else ""
+
     def _schedule(self, rel: str, event_type: str) -> None:
         with self._lock:
             if rel in self._pending:
@@ -37,10 +47,7 @@ class VaultWatcherHandler(FileSystemEventHandler):
 
             def _process() -> None:
                 try:
-                    if event_type == "deleted":
-                        self._indexer.index_file(rel)
-                    else:
-                        self._indexer.index_file(rel)
+                    self._indexer.index_file(rel)
                     if self.on_event:
                         self.on_event(event_type, rel)
                 except Exception:
@@ -53,7 +60,7 @@ class VaultWatcherHandler(FileSystemEventHandler):
             timer.start()
 
     def _rel_path(self, src_path: str) -> str | None:
-        vault = Path(self.ctx.config.vault_real_path or "")
+        vault = Path(self._vault_real_path())
         try:
             rel = Path(src_path).resolve().relative_to(vault.resolve())
         except ValueError:
@@ -101,31 +108,46 @@ class VaultWatcherHandler(FileSystemEventHandler):
 class VaultWatcher:
     _instances: dict[str, VaultWatcher] = {}
 
-    def __init__(self, ctx: ProjectContext) -> None:
+    def __init__(self, ctx: ContextLike) -> None:
         self.ctx = ctx
         self._observer: Observer | None = None
         self._handler: VaultWatcherHandler | None = None
 
     @classmethod
-    def get(cls, ctx: ProjectContext) -> VaultWatcher:
-        pid = ctx.project_id
-        if pid not in cls._instances:
-            cls._instances[pid] = VaultWatcher(ctx)
-        return cls._instances[pid]
+    def _instance_key(cls, ctx: ContextLike) -> str:
+        if isinstance(ctx, VaultContext):
+            return ctx.vault_id
+        return ctx.project_id
+
+    @classmethod
+    def get(cls, ctx: ContextLike) -> VaultWatcher:
+        key = cls._instance_key(ctx)
+        if key not in cls._instances:
+            cls._instances[key] = VaultWatcher(ctx)
+        return cls._instances[key]
+
+    def _watcher_enabled(self) -> bool:
+        if isinstance(self.ctx, VaultContext):
+            return self.ctx.config.watcher_enabled
+        config = self.ctx.config
+        return bool(config and config.watcher_enabled)
+
+    def _vault_path(self) -> str | None:
+        if isinstance(self.ctx, VaultContext):
+            return self.ctx.vault_real_path
+        if self.ctx.config:
+            return self.ctx.config.vault_real_path
+        return None
 
     def start(self, on_event: Callable[[str, str], None] | None = None) -> None:
         if self._observer is not None:
             return
-        config = self.ctx.config
-        if not config or not config.watcher_enabled or not config.vault_real_path:
+        vault_path = self._vault_path()
+        if not self._watcher_enabled() or not vault_path:
             return
         self._handler = VaultWatcherHandler(self.ctx, on_event=on_event)
         self._observer = Observer()
-        self._observer.schedule(
-            self._handler,
-            self.ctx.config.vault_real_path,
-            recursive=True,
-        )
+        self._observer.schedule(self._handler, vault_path, recursive=True)
         self._observer.start()
 
     def stop(self) -> None:

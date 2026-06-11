@@ -24,6 +24,10 @@ class WriteAccessDeniedError(DomainError):
     code = "write_access_denied"
 
 
+class ScopeAccessDeniedError(DomainError):
+    code = "scope_access_denied"
+
+
 class HashMismatchError(DomainError):
     code = "hash_mismatch"
 

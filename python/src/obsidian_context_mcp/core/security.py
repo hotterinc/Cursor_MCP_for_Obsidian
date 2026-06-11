@@ -6,9 +6,10 @@ import os
 import sys
 from pathlib import Path, PurePosixPath
 
-from obsidian_context_mcp.core.errors import PathSecurityError, WriteAccessDeniedError
+from obsidian_context_mcp.core.errors import PathSecurityError, ScopeAccessDeniedError, WriteAccessDeniedError
+from obsidian_context_mcp.core.scope_filter import path_in_scope
 from obsidian_context_mcp.shared.constants import BLOCKED_WRITE_PREFIXES
-from obsidian_context_mcp.shared.types import ProjectConfig, ResolvedPath
+from obsidian_context_mcp.shared.types import AccessScope, ProjectConfig, ResolvedPath
 
 
 def _normalize_relative(relative_path: str) -> str:
@@ -97,3 +98,32 @@ class SecurityBoundary:
 
     def resolve_vault_root(self) -> str:
         return self._vault_real
+
+
+class ScopeBoundary:
+    """Enforces access scope folder restrictions on top of vault security."""
+
+    def __init__(self, boundary: SecurityBoundary, scope: AccessScope | None) -> None:
+        self._boundary = boundary
+        self._scope = scope
+
+    def assert_in_scope(self, relative_path: str) -> None:
+        if self._scope is None:
+            return
+        if not path_in_scope(relative_path, self._scope):
+            raise ScopeAccessDeniedError(
+                f"Path '{relative_path}' is outside the allowed scope '{self._scope.name}'"
+            )
+
+    def resolve_read_path(self, relative_path: str) -> ResolvedPath:
+        resolved = self._boundary.resolve_read_path(relative_path)
+        self.assert_in_scope(resolved.relative_path)
+        return resolved
+
+    def resolve_write_path(self, relative_path: str) -> ResolvedPath:
+        resolved = self._boundary.resolve_write_path(relative_path)
+        self.assert_in_scope(resolved.relative_path)
+        return resolved
+
+    def resolve_vault_root(self) -> str:
+        return self._boundary.resolve_vault_root()

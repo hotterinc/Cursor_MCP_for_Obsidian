@@ -2,17 +2,47 @@
 
 from __future__ import annotations
 
+from typing import Union
+
 from obsidian_context_mcp.core.project import ProjectContext
 from obsidian_context_mcp.core.retrieval import Retriever
+from obsidian_context_mcp.core.vault_context import VaultContext
+from obsidian_context_mcp.core.work_context import WorkContext
 from obsidian_context_mcp.shared.types import ContextPack, ContextSource, IndexStatus, SearchMode
+
+ContextLike = Union[ProjectContext, VaultContext, WorkContext]
 
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _context_id(ctx: ContextLike) -> str:
+    if isinstance(ctx, VaultContext):
+        return ctx.vault_id
+    if isinstance(ctx, WorkContext):
+        return ctx.context_id
+    return ctx.project_id
+
+
+def _is_configured(ctx: ContextLike) -> bool:
+    if isinstance(ctx, VaultContext):
+        return ctx.configured
+    if isinstance(ctx, WorkContext):
+        return bool(ctx.vault_real_path)
+    return ctx.configured
+
+
+def _get_status(ctx: ContextLike) -> IndexStatus:
+    if isinstance(ctx, VaultContext):
+        return ctx.get_status()
+    if isinstance(ctx, WorkContext):
+        return IndexStatus.READY if ctx.vault_real_path else IndexStatus.NOT_CONFIGURED
+    return ctx.get_status()
+
+
 def build_context_pack(
-    ctx: ProjectContext,
+    ctx: ContextLike,
     task: str,
     *,
     token_budget: int = 6000,
@@ -20,13 +50,13 @@ def build_context_pack(
     include_linked: bool = True,
     include_frontmatter: bool = True,
 ) -> ContextPack:
-    freshness = ctx.get_status()
-    if not ctx.configured:
+    freshness = _get_status(ctx)
+    if not _is_configured(ctx):
         return ContextPack(
-            project_id=ctx.project_id,
+            project_id=_context_id(ctx),
             task=task,
             index_freshness=IndexStatus.NOT_CONFIGURED,
-            context="Documentation is not configured. Use config_open_gui to set up Obsidian docs folder.",
+            context="Documentation is not configured. Enable the Obsidian plugin or set up vault.",
             sources=[],
         )
 
@@ -78,7 +108,7 @@ def build_context_pack(
         seen_files.add(rel_path)
 
     return ContextPack(
-        project_id=ctx.project_id,
+        project_id=_context_id(ctx),
         task=task,
         index_freshness=freshness,
         context="\n".join(lines),

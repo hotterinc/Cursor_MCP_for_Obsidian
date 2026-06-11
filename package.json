@@ -15,6 +15,8 @@
     "python:test": "cd python && python -m uv run pytest tests/ -v",
     "python:lint": "cd python && python -m uv run ruff check src tests",
     "python:typecheck": "cd python && python -m uv run mypy src",
+    "plugin:install": "cd obsidian-plugin && npm install",
+    "plugin:build": "cd obsidian-plugin && npm run build",
     "test": "pnpm python:test",
     "lint": "pnpm python:lint && pnpm lint:desktop",
     "typecheck": "pnpm python:typecheck && pnpm typecheck:desktop"

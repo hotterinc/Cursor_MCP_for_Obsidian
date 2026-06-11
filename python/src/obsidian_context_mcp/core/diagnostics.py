@@ -12,7 +12,9 @@ from obsidian_context_mcp.core.project import ProjectContext, detect_project_con
 from obsidian_context_mcp.core.security import SecurityBoundary
 from obsidian_context_mcp.core.sqlite_store import SQLiteStore
 from obsidian_context_mcp.core.vault import validate_vault_path
-from obsidian_context_mcp.core.vector_store import create_vector_store
+from obsidian_context_mcp.core.vault_context import VaultContext
+from obsidian_context_mcp.core.vault_paths import get_vault_chroma_path
+from obsidian_context_mcp.core.vector_store import create_vector_store, create_vector_store_at
 from obsidian_context_mcp.shared.types import DiagnosticCheck, DiagnosticStatus
 
 
@@ -168,3 +170,46 @@ def run_diagnostics_for_root(project_root: str | None = None) -> list[Diagnostic
             )
         ]
     return run_diagnostics(ctx)
+
+
+def run_diagnostics_for_vault(ctx: VaultContext) -> list[DiagnosticCheck]:
+    checks: list[DiagnosticCheck] = []
+    checks.append(_check("vault_exists", Path(ctx.vault_path).exists(), f"Vault: {ctx.vault_path}"))
+    checks.append(_check("vault_readable", os.access(ctx.vault_real_path, os.R_OK), "Vault readable"))
+    checks.append(_check("data_dir_writable", os.access(ctx.data_dir, os.W_OK), f"Data dir: {ctx.data_dir}"))
+
+    try:
+        validation = validate_vault_path(
+            ctx.config.vault_path,
+            include=ctx.config.include,
+            exclude=ctx.config.exclude,
+        )
+        checks.append(
+            _check(
+                "vault_validation",
+                validation.can_read,
+                f"{validation.markdown_files_count} markdown files",
+                details={"warnings": validation.warnings},
+            )
+        )
+    except Exception as exc:
+        checks.append(_check("vault_validation", False, str(exc)))
+
+    try:
+        db = SQLiteStore(ctx.work_context().db_path)
+        db.initialize()
+        checks.append(_check("sqlite_accessible", True, f"SQLite: {ctx.work_context().db_path}"))
+        db.close()
+    except Exception as exc:
+        checks.append(_check("sqlite_accessible", False, str(exc)))
+
+    try:
+        vs = create_vector_store_at(get_vault_chroma_path(ctx.data_dir), ctx.vault_id)
+        checks.append(_check("vector_store", vs.healthcheck(ctx.vault_id), "Vector store accessible"))
+    except Exception as exc:
+        checks.append(_check("vector_store", False, str(exc)))
+
+    scope_count = len(ctx.scope_store.list_scopes())
+    checks.append(_check("scopes_configured", scope_count > 0, f"{scope_count} access scopes", warn=scope_count == 0))
+
+    return checks

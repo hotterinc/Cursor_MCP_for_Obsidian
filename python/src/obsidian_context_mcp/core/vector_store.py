@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 import chromadb
@@ -122,3 +123,10 @@ class ChromaVectorStore(VectorStore):
 def create_vector_store(project_id: str) -> VectorStore:
     path = str(get_project_chroma_path(project_id))
     return ChromaVectorStore(path)
+
+
+def create_vector_store_at(chroma_path: Path, context_id: str) -> VectorStore:
+    store = ChromaVectorStore(str(chroma_path))
+    # touch collection
+    store.healthcheck(context_id)
+    return store

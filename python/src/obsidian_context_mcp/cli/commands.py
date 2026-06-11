@@ -32,6 +32,48 @@ def server(project_root: str | None = typer.Option(None, "--project-root")) -> N
     asyncio.run(run_mcp_server(project_root))
 
 
+def vault_server(
+    vault_path: str = typer.Option(..., "--vault-path"),
+    data_dir: str = typer.Option(..., "--data-dir"),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(0, "--port"),
+) -> None:
+    from obsidian_context_mcp.vault_server.server import run_vault_server
+
+    configure_ml_runtime()
+    run_vault_server(vault_path, data_dir, host=host, port=port)
+
+
+def cursor_proxy(
+    port: int = typer.Option(..., "--port"),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    token: str = typer.Option(..., "--token"),
+) -> None:
+    """Thin stdio proxy to HTTP MCP for Cursor clients without url support."""
+    import sys
+
+    import httpx
+
+    base = f"http://{host}:{port}"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    typer.echo(f"Cursor proxy connecting to {base}/sse", err=True)
+    # Minimal placeholder: instruct user to use url config instead
+    typer.echo(
+        json.dumps(
+            {
+                "error": "Use Cursor url-based MCP config",
+                "example": {
+                    "url": f"{base}/sse",
+                    "headers": headers,
+                },
+            }
+        ),
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
 def gui_backend(project_root: str = typer.Option(..., "--project-root")) -> None:
     configure_ml_runtime()
     setup_logging(level="INFO")
