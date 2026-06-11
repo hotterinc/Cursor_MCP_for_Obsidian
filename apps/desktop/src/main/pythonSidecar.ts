@@ -1,9 +1,48 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { EventEmitter } from 'events'
+import { existsSync } from 'fs'
+import { homedir } from 'os'
 import { join } from 'path'
 import { app } from 'electron'
 import { getAppDataDir } from './deepLink'
 import { log } from './logger'
+
+type SidecarLaunch = { command: string; args: string[] }
+
+function resolveDevSidecarLaunch(pythonDir: string, projectRoot: string): SidecarLaunch {
+  const backendArgs = ['gui-backend', '--project-root', projectRoot]
+
+  const venvBin =
+    process.platform === 'win32'
+      ? join(pythonDir, '.venv', 'Scripts', 'obsidian-context-mcp.exe')
+      : join(pythonDir, '.venv', 'bin', 'obsidian-context-mcp')
+  if (existsSync(venvBin)) {
+    return { command: venvBin, args: backendArgs }
+  }
+
+  const uvCandidates = [
+    process.env.OBSIDIAN_CONTEXT_UV,
+    join(homedir(), 'Library', 'Python', '3.13', 'bin', 'uv'),
+    join(homedir(), '.local', 'bin', 'uv'),
+    '/opt/homebrew/bin/uv',
+    '/usr/local/bin/uv',
+    'uv'
+  ].filter((p): p is string => Boolean(p))
+
+  for (const uv of uvCandidates) {
+    if (uv === 'uv' || existsSync(uv)) {
+      return {
+        command: uv,
+        args: ['--directory', pythonDir, 'run', 'obsidian-context-mcp', ...backendArgs]
+      }
+    }
+  }
+
+  return {
+    command: 'python3',
+    args: ['-m', 'uv', '--directory', pythonDir, 'run', 'obsidian-context-mcp', ...backendArgs]
+  }
+}
 
 type JsonRpcResponse = {
   jsonrpc: string
@@ -34,23 +73,29 @@ export class PythonSidecar extends EventEmitter {
     const pythonDir = join(repoRoot, 'python')
 
     if (isDev) {
-      this.proc = spawn(
-        'python',
-        ['-m', 'uv', '--directory', pythonDir, 'run', 'obsidian-context-mcp', 'gui-backend', '--project-root', projectRoot],
-        {
-          stdio: ['pipe', 'pipe', 'pipe'],
-          env: {
-            ...process.env,
-            PYTHONUNBUFFERED: '1',
-            OBSIDIAN_CONTEXT_DATA_DIR: getAppDataDir(),
-            TOKENIZERS_PARALLELISM: 'false',
-            OMP_NUM_THREADS: '1',
-            MKL_NUM_THREADS: '1',
-            HF_HUB_DISABLE_PROGRESS_BARS: '1',
-        HF_HUB_DISABLE_SYMLINKS_WARNING: '1'
-          }
+      const launch = resolveDevSidecarLaunch(pythonDir, projectRoot)
+      log(`Python sidecar dev launch: ${launch.command} ${launch.args.join(' ')}`)
+      this.proc = spawn(launch.command, launch.args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          PATH: [
+            join(pythonDir, '.venv', 'bin'),
+            join(homedir(), 'Library', 'Python', '3.13', 'bin'),
+            join(homedir(), '.local', 'bin'),
+            '/opt/homebrew/bin',
+            '/usr/local/bin',
+            process.env.PATH ?? ''
+          ].join(':'),
+          PYTHONUNBUFFERED: '1',
+          OBSIDIAN_CONTEXT_DATA_DIR: getAppDataDir(),
+          TOKENIZERS_PARALLELISM: 'false',
+          OMP_NUM_THREADS: '1',
+          MKL_NUM_THREADS: '1',
+          HF_HUB_DISABLE_PROGRESS_BARS: '1',
+          HF_HUB_DISABLE_SYMLINKS_WARNING: '1'
         }
-      )
+      })
     } else {
       const sidecar = join(process.resourcesPath, 'python-sidecar', 'obsidian-context-mcp')
       this.proc = spawn(sidecar, ['gui-backend', '--project-root', projectRoot], {
@@ -58,6 +103,10 @@ export class PythonSidecar extends EventEmitter {
       })
     }
 
+    this.proc.on('error', (err) => {
+      log(`Python sidecar spawn error: ${err.message}`)
+      this.emit('log', `Sidecar failed to start: ${err.message}`)
+    })
     this.proc.stdout.on('data', (chunk: Buffer) => this.handleStdout(chunk))
     this.proc.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
