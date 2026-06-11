@@ -10,7 +10,7 @@ from typing import Union
 
 from loguru import logger
 
-from obsidian_context_mcp.core.chunker import chunk_note
+from obsidian_context_mcp.core.index_serial import INDEX_SERIAL_LOCK
 from obsidian_context_mcp.core.embeddings import create_embedding_provider
 from obsidian_context_mcp.core.locks import ProjectLock
 from obsidian_context_mcp.core.markdown_parser import parse_markdown_file
@@ -61,6 +61,10 @@ class Indexer:
             callback(progress)
 
     def index_file(self, relative_path: str) -> None:
+        with INDEX_SERIAL_LOCK:
+            self._index_file_unlocked(relative_path)
+
+    def _index_file_unlocked(self, relative_path: str) -> None:
         vault_root = Path(self.work.vault_real_path)
         file_path = vault_root / relative_path
         file_id = compute_file_id(
@@ -179,70 +183,71 @@ class Indexer:
 
         self.db.create_index_job(job_id, self.work.context_id, mode.value)
 
-        if mode == IndexMode.FULL:
-            with ProjectLock(self.work.context_id, "index", timeout=5):
-                self.db.reset_all()
-                self.vector_store.reset_project(self.work.context_id)
+        with INDEX_SERIAL_LOCK:
+            if mode == IndexMode.FULL:
+                with ProjectLock(self.work.context_id, "index", timeout=5):
+                    self.db.reset_all()
+                    self.vector_store.reset_project(self.work.context_id)
 
-        vault_root = Path(self.work.vault_real_path)
-        md_files = scan_markdown_files(
-            vault_root,
-            include=self.work.include,
-            exclude=self.work.exclude,
-            docs_subfolder=self.work.docs_subfolder,
-        )
-        progress.total_files = len(md_files)
-        existing = {r["relative_path"]: r for r in self.db.get_all_files()}
-        self._emit(progress_callback, progress)
-
-        for rel in md_files:
-            if self._cancel_flag:
-                progress.status = JobStatus.CANCELLED
-                self.db.finish_index_job(job_id, JobStatus.CANCELLED, stats)
-                return progress
-
-            stats["files_scanned"] += 1
-            progress.files_scanned = stats["files_scanned"]
-            progress.current_file = rel
+            vault_root = Path(self.work.vault_real_path)
+            md_files = scan_markdown_files(
+                vault_root,
+                include=self.work.include,
+                exclude=self.work.exclude,
+                docs_subfolder=self.work.docs_subfolder,
+            )
+            progress.total_files = len(md_files)
+            existing = {r["relative_path"]: r for r in self.db.get_all_files()}
             self._emit(progress_callback, progress)
 
-            file_path = vault_root / rel
-            try:
-                stat = file_path.stat()
-                mtime_ms = int(stat.st_mtime * 1000)
-                row = existing.get(rel)
-                if mode == IndexMode.INCREMENTAL and row:
-                    if row["mtime_ms"] == mtime_ms and row["size"] == stat.st_size:
-                        stats["files_skipped"] += 1
-                        progress.files_skipped = stats["files_skipped"]
-                        self._emit(progress_callback, progress)
-                        continue
-                    if row.get("sha256"):
-                        note_path = vault_root / rel
-                        from obsidian_context_mcp.core.markdown_parser import parse_markdown_file
+            for rel in md_files:
+                if self._cancel_flag:
+                    progress.status = JobStatus.CANCELLED
+                    self.db.finish_index_job(job_id, JobStatus.CANCELLED, stats)
+                    return progress
 
-                        current = parse_markdown_file(note_path, rel)
-                        if current.sha256 == row["sha256"]:
+                stats["files_scanned"] += 1
+                progress.files_scanned = stats["files_scanned"]
+                progress.current_file = rel
+                self._emit(progress_callback, progress)
+
+                file_path = vault_root / rel
+                try:
+                    stat = file_path.stat()
+                    mtime_ms = int(stat.st_mtime * 1000)
+                    row = existing.get(rel)
+                    if mode == IndexMode.INCREMENTAL and row:
+                        if row["mtime_ms"] == mtime_ms and row["size"] == stat.st_size:
                             stats["files_skipped"] += 1
                             progress.files_skipped = stats["files_skipped"]
                             self._emit(progress_callback, progress)
                             continue
+                        if row.get("sha256"):
+                            note_path = vault_root / rel
+                            from obsidian_context_mcp.core.markdown_parser import parse_markdown_file
 
-                self.index_file(rel)
-                stats["files_indexed"] += 1
-                progress.files_indexed = stats["files_indexed"]
-                self._emit(progress_callback, progress)
-            except Exception:
-                stats["files_failed"] += 1
-                progress.files_failed = stats["files_failed"]
-                self._emit(progress_callback, progress)
+                            current = parse_markdown_file(note_path, rel)
+                            if current.sha256 == row["sha256"]:
+                                stats["files_skipped"] += 1
+                                progress.files_skipped = stats["files_skipped"]
+                                self._emit(progress_callback, progress)
+                                continue
 
-        current_set = set(md_files)
-        for row in self.db.get_all_files():
-            if row["relative_path"] not in current_set:
-                chunk_ids = self.db.delete_chunks_for_file(row["id"])
-                self.vector_store.delete_chunks(self.work.context_id, chunk_ids)
-                self.db.mark_file_deleted(row["id"])
+                    self._index_file_unlocked(rel)
+                    stats["files_indexed"] += 1
+                    progress.files_indexed = stats["files_indexed"]
+                    self._emit(progress_callback, progress)
+                except Exception:
+                    stats["files_failed"] += 1
+                    progress.files_failed = stats["files_failed"]
+                    self._emit(progress_callback, progress)
+
+            current_set = set(md_files)
+            for row in self.db.get_all_files():
+                if row["relative_path"] not in current_set:
+                    chunk_ids = self.db.delete_chunks_for_file(row["id"])
+                    self.vector_store.delete_chunks(self.work.context_id, chunk_ids)
+                    self.db.mark_file_deleted(row["id"])
 
         progress.status = JobStatus.COMPLETED
         self.db.finish_index_job(job_id, JobStatus.COMPLETED, stats)

@@ -91,7 +91,13 @@ export class VaultAutoIndexer {
       return;
     }
 
-    const results = await Promise.allSettled(paths.map((path) => client.indexFile(path)));
+    const results: PromiseSettledResult<unknown>[] = [];
+    for (const path of paths) {
+      results.push(await Promise.resolve(client.indexFile(path)).then(
+        (v) => ({ status: "fulfilled" as const, value: v }),
+        (reason) => ({ status: "rejected" as const, reason })
+      ));
+    }
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
       if (result.status === "rejected") {

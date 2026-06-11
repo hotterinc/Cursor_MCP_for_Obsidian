@@ -1514,7 +1514,13 @@ var VaultAutoIndexer = class {
       this.resetIdleTimer();
       return;
     }
-    const results = await Promise.allSettled(paths.map((path3) => client.indexFile(path3)));
+    const results = [];
+    for (const path3 of paths) {
+      results.push(await Promise.resolve(client.indexFile(path3)).then(
+        (v) => ({ status: "fulfilled", value: v }),
+        (reason) => ({ status: "rejected", reason })
+      ));
+    }
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
       if (result.status === "rejected") {
