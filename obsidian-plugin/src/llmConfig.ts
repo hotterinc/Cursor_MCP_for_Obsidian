@@ -1,4 +1,3 @@
-import { DEFAULT_OLLAMA_HOST } from "./llmConfig";
 import type { PluginSettings } from "./types";
 
 export const DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";

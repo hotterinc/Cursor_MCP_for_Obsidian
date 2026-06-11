@@ -1,7 +1,7 @@
 {
   "id": "obsidian-context-mcp",
   "name": "Obsidian Context MCP",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "minAppVersion": "1.5.0",
   "description": "Local vector search and MCP server for Cursor with scoped vault access.",
   "author": "hotter_inc",

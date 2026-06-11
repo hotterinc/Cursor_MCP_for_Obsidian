@@ -1,11 +1,16 @@
 import { Notice, Setting } from "obsidian";
-import { DEFAULT_OLLAMA_HOST, getActiveLlmConfig, type LlmPreset } from "./llmConfig";
+import {
+  DEFAULT_OLLAMA_HOST,
+  getActiveLlmConfig,
+  type LlmPreset,
+  type LlmPullProgress,
+} from "./llmConfig";
+import { renderLlmPullProgress, watchLlmPullProgress } from "./llmPullProgress";
 import type ObsidianContextPlugin from "./main";
 import type { LlmMode } from "./types";
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => window.setTimeout(r, ms));
-}
+/** Cancel in-flight pull progress watchers when settings re-render. */
+let pullWatchGeneration = 0;
 
 export function renderLlmSettings(
   containerEl: HTMLElement,
@@ -25,6 +30,7 @@ export function renderLlmSettings(
   const customEl = containerEl.createDiv({ cls: "ocm-llm-custom" });
 
   const refreshSections = () => {
+    const watchGen = ++pullWatchGeneration;
     modelPickEl.empty();
     customEl.empty();
     progressEl.empty();
@@ -34,7 +40,7 @@ export function renderLlmSettings(
     } else if (plugin.settings.llmMode === "custom") {
       renderCustomFields(customEl, plugin, progressEl, refreshSections);
     }
-    void updateProgressDisplay(plugin, progressEl);
+    void resumePullWatchIfNeeded(plugin, progressEl, refreshSections, watchGen);
     plugin.refreshLlmRibbon();
   };
 
@@ -177,6 +183,24 @@ function renderCustomFields(
     });
 }
 
+async function finishPull(
+  plugin: ObsidianContextPlugin,
+  model: string,
+  p: LlmPullProgress,
+  refresh: () => void
+): Promise<void> {
+  if (p.error) {
+    plugin.settings.llmModelReady = false;
+    new Notice(`Ошибка загрузки: ${p.error}`);
+  } else {
+    plugin.settings.llmModelReady = true;
+    new Notice(`Модель ${model} готова`);
+  }
+  await plugin.saveSettings();
+  refresh();
+  plugin.refreshLlmRibbon();
+}
+
 async function startModelPull(
   plugin: ObsidianContextPlugin,
   backend: "local" | "ollama",
@@ -185,6 +209,7 @@ async function startModelPull(
   refresh: () => void,
   host: string = DEFAULT_OLLAMA_HOST
 ): Promise<void> {
+  const watchGen = pullWatchGeneration;
   try {
     if (!plugin.client) await plugin.startSidecarPublic();
     const client = plugin.ensureClientPublic();
@@ -197,66 +222,68 @@ async function startModelPull(
       }
     }
 
-    await client.llmPull(host, model, backend);
-    new Notice(`Скачивание ${model}…`);
-    while (true) {
-      const p = await client.llmPullStatus();
-      updateProgressEl(progressEl, p);
-      if (!p.active) {
-        if (p.error) {
-          new Notice(`Ошибка загрузки: ${p.error}`);
-          plugin.settings.llmModelReady = false;
-        } else {
-          plugin.settings.llmModelReady = true;
-          new Notice(`Модель ${model} готова`);
-        }
-        await plugin.saveSettings();
-        refresh();
-        plugin.refreshLlmRibbon();
-        break;
-      }
-      await sleep(600);
+    const existing = await client.llmPullStatus();
+    if (existing.active && existing.model === model) {
+      new Notice(`Продолжаем загрузку ${model}…`);
+    } else {
+      await client.llmPull(host, model, backend);
+      new Notice(`Загрузка LLM ${model}: старт…`);
     }
+
+    const result = await watchLlmPullProgress(() => client.llmPullStatus(), {
+      onUpdate: (p) => {
+        if (watchGen !== pullWatchGeneration) return;
+        renderLlmPullProgress(progressEl, p);
+      },
+    });
+
+    if (watchGen !== pullWatchGeneration) return;
+    await finishPull(plugin, model, result, refresh);
   } catch (e) {
     new Notice(String(e));
   }
 }
 
-async function updateProgressDisplay(
+async function resumePullWatchIfNeeded(
   plugin: ObsidianContextPlugin,
-  progressEl: HTMLElement
+  progressEl: HTMLElement,
+  refresh: () => void,
+  watchGen: number
 ): Promise<void> {
-  const cfg = getActiveLlmConfig(plugin.settings);
-  if (!cfg || !plugin.client) return;
+  if (!plugin.client) return;
   try {
-    const status = await plugin
-      .ensureClientPublic()
-      .llmStatus(cfg.host, cfg.model, cfg.backend);
-    if (status.modelAvailable && !plugin.settings.llmModelReady) {
-      plugin.settings.llmModelReady = true;
-      await plugin.saveSettings();
-      plugin.refreshLlmRibbon();
+    const client = plugin.ensureClientPublic();
+    const cfg = getActiveLlmConfig(plugin.settings);
+    if (cfg) {
+      const status = await client.llmStatus(cfg.host, cfg.model, cfg.backend);
+      if (status.modelAvailable && !plugin.settings.llmModelReady) {
+        plugin.settings.llmModelReady = true;
+        await plugin.saveSettings();
+        plugin.refreshLlmRibbon();
+      }
     }
-    if (status.pull.active) {
-      updateProgressEl(progressEl, status.pull);
+
+    const pull = await client.llmPullStatus();
+    if (!pull.active) {
+      if (pull.status === "success" || plugin.settings.llmModelReady) {
+        renderLlmPullProgress(progressEl, { ...pull, active: false, status: "success" });
+      }
+      return;
     }
+
+    renderLlmPullProgress(progressEl, pull);
+    new Notice(`Загрузка LLM ${pull.model} продолжается…`);
+
+    const result = await watchLlmPullProgress(() => client.llmPullStatus(), {
+      onUpdate: (p) => {
+        if (watchGen !== pullWatchGeneration) return;
+        renderLlmPullProgress(progressEl, p);
+      },
+    });
+
+    if (watchGen !== pullWatchGeneration) return;
+    await finishPull(plugin, pull.model, result, refresh);
   } catch {
     /* ignore */
-  }
-}
-
-function updateProgressEl(
-  el: HTMLElement,
-  p: { status: string; percent: number; error: string | null; active: boolean }
-): void {
-  el.empty();
-  if (p.active || p.status === "success") {
-    el.createEl("p", {
-      text: p.active
-        ? `Загрузка: ${p.status} ${p.percent > 0 ? `${p.percent}%` : ""}`
-        : p.error
-          ? `Ошибка: ${p.error}`
-          : "Модель загружена",
-    });
   }
 }

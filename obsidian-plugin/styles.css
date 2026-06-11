@@ -35,7 +35,21 @@
 .ocm-folder-picker-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ocm-folder-picker-col { justify-self: center; width: 18px; height: 18px; }
 .ocm-llm-tier-label { font-weight: 600; margin: 12px 0 4px; font-size: 0.9em; }
-.ocm-llm-pull-progress { margin: 8px 0; color: var(--text-accent); }
+.ocm-llm-pull-progress { margin: 12px 0; }
+.ocm-llm-pull-label { margin: 0 0 6px; color: var(--text-accent); font-size: 0.9em; }
+.ocm-llm-pull-done { margin: 0; color: var(--text-success); }
+.ocm-llm-pull-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+}
+.ocm-llm-pull-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--interactive-accent);
+  transition: width 0.3s ease;
+}
 .ocm-llm-modal { width: min(720px, 92vw) !important; }
 .ocm-llm-answer { margin: 16px 0; padding: 12px; border-radius: 8px; background: var(--background-secondary); white-space: pre-wrap; line-height: 1.5; }
 .ocm-llm-answer-text { white-space: pre-wrap; }
