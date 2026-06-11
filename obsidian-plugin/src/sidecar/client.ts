@@ -1,3 +1,4 @@
+import { requestUrl } from "obsidian";
 import type { AccessScope, SearchResult, VaultRuntimeInfo } from "../types";
 
 export class SidecarClient {
@@ -7,16 +8,21 @@ export class SidecarClient {
     return new SidecarClient(`http://${runtime.host}:${runtime.port}`);
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-      ...init,
+  private async request<T>(
+    path: string,
+    init?: { method?: string; body?: string }
+  ): Promise<T> {
+    const res = await requestUrl({
+      url: `${this.baseUrl}${path}`,
+      method: init?.method ?? "GET",
+      headers: { "Content-Type": "application/json" },
+      body: init?.body,
+      throw: false,
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`${res.status}: ${text}`);
+    if (res.status >= 400) {
+      throw new Error(`${res.status}: ${res.text}`);
     }
-    return (await res.json()) as T;
+    return res.json as T;
   }
 
   health() {
@@ -24,7 +30,9 @@ export class SidecarClient {
   }
 
   status() {
-    return this.request<{ fileCount: number; indexStatus: string; job: unknown }>("/api/v1/status");
+    return this.request<{ fileCount: number; indexStatus: string; job: unknown }>(
+      "/api/v1/status"
+    );
   }
 
   search(query: string, topK = 10) {
@@ -53,9 +61,10 @@ export class SidecarClient {
   }
 
   deleteScope(scopeId: string) {
-    return this.request<{ ok: boolean }>(`/api/v1/scopes/${encodeURIComponent(scopeId)}`, {
-      method: "DELETE",
-    });
+    return this.request<{ ok: boolean }>(
+      `/api/v1/scopes/${encodeURIComponent(scopeId)}`,
+      { method: "DELETE" }
+    );
   }
 
   regenerateToken(scopeId: string) {

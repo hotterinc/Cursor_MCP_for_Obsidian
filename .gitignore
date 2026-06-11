@@ -23,6 +23,10 @@ apps/desktop/release/
 
 # Bundled Python sidecar
 apps/desktop/resources/python-sidecar/
+obsidian-plugin/bin/
+obsidian-plugin/server/
+python/build/
+python/dist/
 
 # Local app data (never commit)
 .obsidian-context-mcp/

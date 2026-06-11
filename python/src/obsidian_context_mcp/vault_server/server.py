@@ -14,11 +14,11 @@ import uvicorn
 from loguru import logger
 
 from obsidian_context_mcp.core.indexer import Indexer
-from obsidian_context_mcp.core.locks import RuntimeLock
+from obsidian_context_mcp.core.locks import PathLock
 from obsidian_context_mcp.core.logging import setup_logging
 from obsidian_context_mcp.core.ml_runtime import configure_ml_runtime
 from obsidian_context_mcp.core.vault_context import VaultContext, get_vault_context
-from obsidian_context_mcp.core.vault_paths import get_runtime_path
+from obsidian_context_mcp.core.vault_paths import get_runtime_path, get_vault_locks_dir
 from obsidian_context_mcp.core.watcher import VaultWatcher
 from obsidian_context_mcp.shared.constants import DEFAULT_VAULT_SERVER_HOST
 from obsidian_context_mcp.shared.types import IndexMode, VaultRuntimeInfo
@@ -59,13 +59,13 @@ def run_vault_server(
     host: str = DEFAULT_VAULT_SERVER_HOST,
     port: int = 0,
 ) -> None:
-    configure_ml_runtime()
     resolved_data = Path(data_dir).resolve()
+    configure_ml_runtime(data_dir=resolved_data)
     ctx = get_vault_context(vault_path, data_dir=resolved_data)
     setup_logging(log_file=ctx.data_dir / "logs" / "vault-server.log")
 
-    lock_name = f"vault-server-{ctx.vault_id[:16]}"
-    runtime_lock = RuntimeLock(lock_name, timeout=3)
+    lock_path = get_vault_locks_dir(resolved_data) / "vault-server.lock"
+    runtime_lock = PathLock(lock_path, timeout=3)
     try:
         runtime_lock.acquire()
     except Exception:

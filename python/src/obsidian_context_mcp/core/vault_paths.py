@@ -66,3 +66,10 @@ def get_vault_locks_dir(data_dir: Path) -> Path:
     path = data_dir / "locks"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_vault_models_cache_dir(data_dir: Path) -> Path:
+    """Embedding models cache — kept inside plugin data dir (self-contained vault)."""
+    path = data_dir / "models-cache"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

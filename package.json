@@ -17,6 +17,8 @@
     "python:typecheck": "cd python && python -m uv run mypy src",
     "plugin:install": "cd obsidian-plugin && npm install",
     "plugin:build": "cd obsidian-plugin && npm run build",
+    "plugin:sidecar": "bash scripts/build-plugin-sidecar.sh",
+    "plugin:deploy": "bash scripts/install-obsidian-plugin.sh",
     "test": "pnpm python:test",
     "lint": "pnpm python:lint && pnpm lint:desktop",
     "typecheck": "pnpm python:typecheck && pnpm typecheck:desktop"
