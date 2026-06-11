@@ -52,6 +52,8 @@ export interface VaultStatus {
   job: IndexProgress | null;
 }
 
+export type LlmMode = "off" | "preset" | "custom";
+
 export interface PluginSettings {
   pythonCommand: string;
   sidecarArgs: string;
@@ -62,6 +64,13 @@ export interface PluginSettings {
   autoReindexOnChange: boolean;
   /** Stop vault-server when Obsidian exits (plugin onunload). */
   stopServerOnQuit: boolean;
+  /** Local LLM Q&A over vault (Ollama). */
+  llmMode: LlmMode;
+  llmPresetModel: string;
+  llmCustomHost: string;
+  llmCustomModel: string;
+  /** Set after successful model pull or when model detected in Ollama. */
+  llmModelReady: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -71,4 +80,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   serverPort: 18432,
   autoReindexOnChange: true,
   stopServerOnQuit: false,
+  llmMode: "off",
+  llmPresetModel: "",
+  llmCustomHost: "http://127.0.0.1:11434",
+  llmCustomModel: "",
+  llmModelReady: false,
 };

@@ -1,12 +1,15 @@
 import { Notice, Plugin, setTooltip } from "obsidian";
 import { SidecarClient } from "./sidecar/client";
 import { SidecarManager } from "./sidecar/manager";
+import { isLlmUiEnabled, getActiveLlmConfig } from "./llmConfig";
+import { renderLlmSettings } from "./llmSettings";
 import { resolvePluginDataDir, resolvePluginDir } from "./paths";
 import { watchReindexProgress, formatIndexStatus } from "./reindexProgress";
 import { ObsidianContextSettingTab } from "./settings";
 import { DEFAULT_SETTINGS, PluginSettings, VaultRuntimeInfo } from "./types";
 import { ScopesModal } from "./views/ScopesModal";
 import { SearchModal } from "./views/SearchModal";
+import { LlmSearchModal } from "./views/LlmSearchModal";
 import { VaultAutoIndexer } from "./vaultAutoIndex";
 
 export default class ObsidianContextPlugin extends Plugin {
@@ -17,6 +20,7 @@ export default class ObsidianContextPlugin extends Plugin {
   private startPromise: Promise<void> | null = null;
   private settingTab: ObsidianContextSettingTab | null = null;
   private vaultAutoIndexer: VaultAutoIndexer | null = null;
+  private llmRibbonEl: HTMLElement | null = null;
   statusText = "Not started";
 
   async onload() {
@@ -46,6 +50,12 @@ export default class ObsidianContextPlugin extends Plugin {
         id: "ocm-semantic-search",
         name: "Semantic search vault",
         callback: () => void this.openSearchModal(),
+      });
+
+      this.addCommand({
+        id: "ocm-llm-search",
+        name: "Ask vault (LLM)",
+        callback: () => void this.openLlmSearchModal(),
       });
 
       this.addCommand({
@@ -83,6 +93,7 @@ export default class ObsidianContextPlugin extends Plugin {
       }
 
       this.setupVaultAutoIndex();
+      this.refreshLlmRibbon();
     } catch (e) {
       console.error("[obsidian-context-mcp] onload failed:", e);
       this.statusText = `Plugin error: ${e}`;
@@ -146,6 +157,7 @@ export default class ObsidianContextPlugin extends Plugin {
   async onunload() {
     this.vaultAutoIndexer?.detach();
     this.vaultAutoIndexer = null;
+    this.llmRibbonEl = null;
     if (this.settings.stopServerOnQuit) {
       try {
         await this.sidecar?.forceStopForRestart();
@@ -181,6 +193,7 @@ export default class ObsidianContextPlugin extends Plugin {
       this.client = SidecarClient.fromRuntime(this.runtime);
       const status = await this.client.status();
       this.applyVaultStatus(status);
+      void this.syncLlmModelReady();
     } catch (e) {
       console.error("[obsidian-context-mcp] startSidecar:", e);
       this.statusText = `Error: ${e}`;
@@ -195,6 +208,41 @@ export default class ObsidianContextPlugin extends Plugin {
       throw new Error("vault-server is not running. Command palette → Restart vault-server");
     }
     return this.client;
+  }
+
+  /** Public wrapper for settings UI. */
+  ensureClientPublic(): SidecarClient {
+    return this.ensureClient();
+  }
+
+  async startSidecarPublic(): Promise<void> {
+    return this.startSidecar();
+  }
+
+  refreshLlmRibbon(): void {
+    const show = isLlmUiEnabled(this.settings) && this.settings.llmModelReady;
+    if (show && !this.llmRibbonEl) {
+      this.llmRibbonEl = this.addRibbonIcon("message-circle", "Спросить vault (LLM)", () => {
+        void this.openLlmSearchModal();
+      });
+    } else if (!show && this.llmRibbonEl) {
+      this.llmRibbonEl.remove();
+      this.llmRibbonEl = null;
+    }
+  }
+
+  async openLlmSearchModal() {
+    try {
+      if (!this.client) await this.startSidecar();
+      if (!this.settings.llmModelReady) {
+        new Notice("Сначала скачайте модель в Settings → Vault LLM");
+        return;
+      }
+      new LlmSearchModal(this.app, this, this.ensureClient()).open();
+    } catch (e) {
+      new Notice(String(e));
+      throw e;
+    }
   }
 
   async openSearchModal() {
@@ -222,6 +270,22 @@ export default class ObsidianContextPlugin extends Plugin {
     this.vaultAutoIndexer?.detach();
     this.vaultAutoIndexer = new VaultAutoIndexer(this.app, () => this.client);
     this.vaultAutoIndexer.attach((ref) => this.registerEvent(ref));
+  }
+
+  async syncLlmModelReady(): Promise<void> {
+    const cfg = getActiveLlmConfig(this.settings);
+    if (!cfg || !this.client) return;
+    try {
+      const status = await this.client.llmStatus(cfg.host, cfg.model, cfg.backend);
+      if (status.modelAvailable !== this.settings.llmModelReady) {
+        this.settings.llmModelReady = status.modelAvailable;
+        await this.saveSettings();
+        this.refreshLlmRibbon();
+        this.refreshSettingsDisplay();
+      }
+    } catch {
+      /* ollama optional */
+    }
   }
 
   async reindexVault() {

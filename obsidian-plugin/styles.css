@@ -34,3 +34,10 @@
 .ocm-folder-picker-row:nth-child(even):not(.ocm-folder-picker-master) { background: var(--background-secondary); }
 .ocm-folder-picker-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ocm-folder-picker-col { justify-self: center; width: 18px; height: 18px; }
+.ocm-llm-tier-label { font-weight: 600; margin: 12px 0 4px; font-size: 0.9em; }
+.ocm-llm-pull-progress { margin: 8px 0; color: var(--text-accent); }
+.ocm-llm-modal { width: min(720px, 92vw) !important; }
+.ocm-llm-answer { margin: 16px 0; padding: 12px; border-radius: 8px; background: var(--background-secondary); white-space: pre-wrap; line-height: 1.5; }
+.ocm-llm-answer-text { white-space: pre-wrap; }
+.ocm-llm-error { color: var(--text-error); }
+.ocm-llm-sources { margin-top: 16px; }

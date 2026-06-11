@@ -13,6 +13,17 @@ from starlette.responses import JSONResponse, Response
 
 from obsidian_context_mcp.core.diagnostics import run_diagnostics_for_vault
 from obsidian_context_mcp.core.indexer import Indexer
+from obsidian_context_mcp.core.llm_service import (
+    DEFAULT_OLLAMA_HOST,
+    LLM_PRESETS,
+    LlmPullManager,
+    ask_with_rag,
+    list_installed_ollama_models,
+    local_model_exists,
+    ollama_health,
+    ollama_model_available,
+)
+from obsidian_context_mcp.core.llm_local import list_local_models
 from obsidian_context_mcp.core.retrieval import Retriever
 from obsidian_context_mcp.core.scope_filter import filter_paths
 from obsidian_context_mcp.core.scope_store import generate_scope_token
@@ -160,3 +171,110 @@ class AdminApi:
         )
         self.vault_ctx.config = config
         return JSONResponse(config.model_dump())
+
+    async def llm_presets(self, _request: Request) -> Response:
+        return JSONResponse(
+            {
+                "presets": LLM_PRESETS,
+                "defaultHost": DEFAULT_OLLAMA_HOST,
+                "defaultBackend": "local",
+            }
+        )
+
+    async def llm_status(self, request: Request) -> Response:
+        backend = request.query_params.get("backend", "local")
+        host = request.query_params.get("host", DEFAULT_OLLAMA_HOST)
+        model = request.query_params.get("model", "")
+        data_dir = self.vault_ctx.data_dir
+
+        if backend == "local":
+            health = {"ok": True, "backend": "local"}
+            installed = await asyncio.to_thread(list_local_models, data_dir)
+            available = (
+                await asyncio.to_thread(local_model_exists, data_dir, model) if model else False
+            )
+        else:
+            health = await asyncio.to_thread(ollama_health, host)
+            installed = []
+            available = False
+            if health.get("ok"):
+                try:
+                    installed = await asyncio.to_thread(list_installed_ollama_models, host)
+                    if model:
+                        available = await asyncio.to_thread(
+                            ollama_model_available, host, model
+                        )
+                except Exception as exc:
+                    health["error"] = str(exc)
+
+        pull = LlmPullManager.get().get_progress()
+        return JSONResponse(
+            {
+                "health": health,
+                "installedModels": installed,
+                "modelAvailable": available,
+                "pull": pull,
+                "backend": backend,
+            }
+        )
+
+    async def llm_pull(self, request: Request) -> Response:
+        body = await request.json()
+        backend = body.get("backend", "local")
+        host = body.get("host", DEFAULT_OLLAMA_HOST)
+        model = body.get("model", "")
+        if not model:
+            return JSONResponse({"error": "model required"}, status_code=400)
+
+        if backend == "local":
+            progress = await asyncio.to_thread(
+                LlmPullManager.get().start_local_pull,
+                self.vault_ctx.data_dir,
+                model,
+            )
+        else:
+            progress = await asyncio.to_thread(
+                LlmPullManager.get().start_ollama_pull, host, model
+            )
+        return JSONResponse(progress)
+
+    async def llm_pull_status(self, _request: Request) -> Response:
+        return JSONResponse(LlmPullManager.get().get_progress())
+
+    async def llm_ask(self, request: Request) -> Response:
+        body = await request.json()
+        query = body.get("query", "").strip()
+        backend = body.get("backend", "local")
+        host = body.get("host", DEFAULT_OLLAMA_HOST)
+        model = body.get("model", "")
+        if not query:
+            return JSONResponse({"error": "query required"}, status_code=400)
+        if not model:
+            return JSONResponse({"error": "model required"}, status_code=400)
+
+        if backend == "local":
+            if not await asyncio.to_thread(local_model_exists, self.vault_ctx.data_dir, model):
+                return JSONResponse(
+                    {"error": f"Model {model} not downloaded. Select it in plugin settings."},
+                    status_code=400,
+                )
+        elif not await asyncio.to_thread(ollama_model_available, host, model):
+            return JSONResponse(
+                {"error": f"Model {model} not in Ollama. Download it first."},
+                status_code=400,
+            )
+
+        try:
+            result = await asyncio.to_thread(
+                ask_with_rag,
+                self.vault_ctx,
+                query,
+                model,
+                backend=backend,
+                host=host,
+                data_dir=self.vault_ctx.data_dir,
+                top_k=int(body.get("topK", 8)),
+            )
+            return JSONResponse(result.to_dict())
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)

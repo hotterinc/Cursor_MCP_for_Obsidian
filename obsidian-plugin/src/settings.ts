@@ -5,6 +5,7 @@ import {
 } from "./paths";
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type ObsidianContextPlugin from "./main";
+import { renderLlmSettings } from "./llmSettings";
 import { DEFAULT_SETTINGS } from "./types";
 
 export class ObsidianContextSettingTab extends PluginSettingTab {
@@ -135,6 +136,8 @@ export class ObsidianContextSettingTab extends PluginSettingTab {
           void this.runAction(btn, "Open scopes", () => this.plugin.openScopesModal());
         });
       });
+
+    renderLlmSettings(containerEl, this.plugin);
   }
 
   private async runAction(

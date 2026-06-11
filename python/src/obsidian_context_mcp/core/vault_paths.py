@@ -73,3 +73,10 @@ def get_vault_models_cache_dir(data_dir: Path) -> Path:
     path = data_dir / "models-cache"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_vault_llm_models_dir(data_dir: Path) -> Path:
+    """Downloaded GGUF chat models for built-in LLM."""
+    path = data_dir / "models-llm"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

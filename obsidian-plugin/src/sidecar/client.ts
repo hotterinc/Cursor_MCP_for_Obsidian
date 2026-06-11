@@ -1,4 +1,10 @@
 import { requestUrl } from "obsidian";
+import type {
+  LlmAskResult,
+  LlmPreset,
+  LlmPullProgress,
+  LlmStatus,
+} from "../llmConfig";
 import type { AccessScope, IndexProgress, SearchResult, VaultRuntimeInfo, VaultStatus } from "../types";
 
 export class SidecarClient {
@@ -93,6 +99,33 @@ export class SidecarClient {
     return this.request<{ fileCount: number; sample: string[] }>("/api/v1/scopes/preview", {
       method: "POST",
       body: JSON.stringify(scope),
+    });
+  }
+
+  llmPresets() {
+    return this.request<{ presets: LlmPreset[]; defaultHost: string }>("/api/v1/llm/presets");
+  }
+
+  llmStatus(host: string, model: string, backend: "local" | "ollama" = "local") {
+    const q = new URLSearchParams({ host, model, backend });
+    return this.request<LlmStatus>(`/api/v1/llm/status?${q}`);
+  }
+
+  llmPull(host: string, model: string, backend: "local" | "ollama" = "local") {
+    return this.request<LlmPullProgress>("/api/v1/llm/pull", {
+      method: "POST",
+      body: JSON.stringify({ host, model, backend }),
+    });
+  }
+
+  llmPullStatus() {
+    return this.request<LlmPullProgress>("/api/v1/llm/pull-status");
+  }
+
+  llmAsk(query: string, host: string, model: string, backend: "local" | "ollama" = "local", topK = 8) {
+    return this.request<LlmAskResult>("/api/v1/llm/ask", {
+      method: "POST",
+      body: JSON.stringify({ query, host, model, backend, topK }),
     });
   }
 }

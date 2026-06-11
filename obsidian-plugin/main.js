@@ -32,7 +32,7 @@ __export(main_exports, {
   default: () => ObsidianContextPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian8 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/sidecar/client.ts
 var import_obsidian = require("obsidian");
@@ -113,6 +113,28 @@ var SidecarClient = class _SidecarClient {
     return this.request("/api/v1/scopes/preview", {
       method: "POST",
       body: JSON.stringify(scope)
+    });
+  }
+  llmPresets() {
+    return this.request("/api/v1/llm/presets");
+  }
+  llmStatus(host, model, backend = "local") {
+    const q = new URLSearchParams({ host, model, backend });
+    return this.request(`/api/v1/llm/status?${q}`);
+  }
+  llmPull(host, model, backend = "local") {
+    return this.request("/api/v1/llm/pull", {
+      method: "POST",
+      body: JSON.stringify({ host, model, backend })
+    });
+  }
+  llmPullStatus() {
+    return this.request("/api/v1/llm/pull-status");
+  }
+  llmAsk(query, host, model, backend = "local", topK = 8) {
+    return this.request("/api/v1/llm/ask", {
+      method: "POST",
+      body: JSON.stringify({ query, host, model, backend, topK })
     });
   }
 };
@@ -427,6 +449,23 @@ var SidecarManager = class {
   }
 };
 
+// src/llmConfig.ts
+var DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";
+function getActiveLlmConfig(settings) {
+  if (settings.llmMode === "off") return null;
+  if (settings.llmMode === "preset") {
+    if (!settings.llmPresetModel) return null;
+    return { backend: "local", host: DEFAULT_OLLAMA_HOST, model: settings.llmPresetModel };
+  }
+  const host = settings.llmCustomHost?.trim() || DEFAULT_OLLAMA_HOST;
+  const model = settings.llmCustomModel?.trim();
+  if (!model) return null;
+  return { backend: "ollama", host, model };
+}
+function isLlmUiEnabled(settings) {
+  return settings.llmMode !== "off" && Boolean(getActiveLlmConfig(settings));
+}
+
 // src/reindexProgress.ts
 var import_obsidian3 = require("obsidian");
 var MILESTONES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
@@ -488,7 +527,186 @@ function formatIndexStatus(indexed, total, indexStatus) {
 }
 
 // src/settings.ts
+var import_obsidian5 = require("obsidian");
+
+// src/llmSettings.ts
 var import_obsidian4 = require("obsidian");
+function sleep2(ms) {
+  return new Promise((r) => window.setTimeout(r, ms));
+}
+function renderLlmSettings(containerEl, plugin) {
+  containerEl.createEl("h3", { text: "Vault LLM" });
+  const desc = containerEl.createDiv({ cls: "ocm-muted" });
+  desc.setText(
+    "\u041E\u0442\u0432\u0435\u0442\u044B \u043F\u043E \u0432\u0430\u0448\u0438\u043C \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u043C: \u043F\u043E\u0438\u0441\u043A \u043F\u043E \u0438\u043D\u0434\u0435\u043A\u0441\u0443 + \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F LLM. Preset \u2014 \u0441\u043A\u0430\u0447\u0438\u0432\u0430\u043D\u0438\u0435 GGUF \u0432 plugin/data (Ollama \u043D\u0435 \u043D\u0443\u0436\u0435\u043D). Custom \u2014 \u0432\u043D\u0435\u0448\u043D\u0438\u0439 Ollama \u043D\u0430 localhost."
+  );
+  const progressEl = containerEl.createDiv({ cls: "ocm-llm-pull-progress" });
+  const modelPickEl = containerEl.createDiv({ cls: "ocm-llm-model-pick" });
+  const customEl = containerEl.createDiv({ cls: "ocm-llm-custom" });
+  const refreshSections = () => {
+    modelPickEl.empty();
+    customEl.empty();
+    progressEl.empty();
+    if (plugin.settings.llmMode === "preset") {
+      void renderPresetPicker(modelPickEl, plugin, progressEl, refreshSections);
+    } else if (plugin.settings.llmMode === "custom") {
+      renderCustomFields(customEl, plugin, progressEl, refreshSections);
+    }
+    void updateProgressDisplay(plugin, progressEl);
+    plugin.refreshLlmRibbon();
+  };
+  new import_obsidian4.Setting(containerEl).setName("\u0420\u0435\u0436\u0438\u043C LLM").setDesc("Off \xB7 Choose model (\u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u043E\u0435 \u0441\u043A\u0430\u0447\u0438\u0432\u0430\u043D\u0438\u0435) \xB7 Custom (Ollama)").addDropdown((dd) => {
+    dd.addOption("off", "Off");
+    dd.addOption("preset", "Choose model");
+    dd.addOption("custom", "Custom");
+    dd.setValue(plugin.settings.llmMode);
+    dd.onChange(async (v) => {
+      plugin.settings.llmMode = v;
+      if (v === "off") {
+        plugin.settings.llmModelReady = false;
+      }
+      await plugin.saveSettings();
+      refreshSections();
+    });
+  });
+  refreshSections();
+}
+async function renderPresetPicker(el, plugin, progressEl, refresh) {
+  try {
+    if (!plugin.client) await plugin.startSidecarPublic();
+    const client = plugin.ensureClientPublic();
+    const { presets } = await client.llmPresets();
+    const small = presets.filter((p) => p.tier === "small");
+    const medium = presets.filter((p) => p.tier === "medium");
+    el.createEl("p", { text: "\u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0435 \u043C\u043E\u0434\u0435\u043B\u0438", cls: "ocm-llm-tier-label" });
+    for (const p of small) {
+      addPresetRow(el, plugin, p, progressEl, refresh);
+    }
+    el.createEl("p", { text: "\u0421\u0440\u0435\u0434\u043D\u0438\u0435 \u043C\u043E\u0434\u0435\u043B\u0438", cls: "ocm-llm-tier-label" });
+    for (const p of medium) {
+      addPresetRow(el, plugin, p, progressEl, refresh);
+    }
+    if (plugin.settings.llmPresetModel) {
+      el.createEl("p", {
+        cls: "ocm-muted",
+        text: `\u0412\u044B\u0431\u0440\u0430\u043D\u043E: ${plugin.settings.llmPresetModel}${plugin.settings.llmModelReady ? " \u2713 \u0433\u043E\u0442\u043E\u0432\u0430" : " \u2014 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 Select \u0434\u043B\u044F \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438"}`
+      });
+    }
+  } catch (e) {
+    el.createEl("p", { text: `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439: ${e}` });
+  }
+}
+function addPresetRow(el, plugin, preset, progressEl, refresh) {
+  const row = new import_obsidian4.Setting(el).setName(preset.name).setDesc(`${preset.description} \xB7 ${preset.sizeHint} \xB7 HuggingFace GGUF`);
+  const selected = plugin.settings.llmPresetModel === preset.id;
+  row.addButton((btn) => {
+    btn.setButtonText(selected ? "Selected" : "Select");
+    btn.setDisabled(selected && plugin.settings.llmModelReady);
+    btn.onClick(async () => {
+      plugin.settings.llmPresetModel = preset.id;
+      plugin.settings.llmModelReady = false;
+      await plugin.saveSettings();
+      refresh();
+      await startModelPull(plugin, "local", preset.id, progressEl, refresh);
+    });
+  });
+  if (selected && !plugin.settings.llmModelReady) {
+    row.addButton((btn) => {
+      btn.setButtonText("Retry download");
+      btn.onClick(async () => {
+        await startModelPull(plugin, "local", preset.id, progressEl, refresh);
+      });
+    });
+  }
+}
+function renderCustomFields(el, plugin, progressEl, refresh) {
+  new import_obsidian4.Setting(el).setName("Ollama host").setDesc("\u0422\u043E\u043B\u044C\u043A\u043E localhost, \u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440 http://127.0.0.1:11434").addText(
+    (text) => text.setValue(plugin.settings.llmCustomHost || DEFAULT_OLLAMA_HOST).onChange(async (v) => {
+      plugin.settings.llmCustomHost = v.trim() || DEFAULT_OLLAMA_HOST;
+      plugin.settings.llmModelReady = false;
+      await plugin.saveSettings();
+      plugin.refreshLlmRibbon();
+    })
+  );
+  new import_obsidian4.Setting(el).setName("Model name").setDesc("\u0418\u043C\u044F \u043C\u043E\u0434\u0435\u043B\u0438 \u0432 Ollama, \u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440 qwen2.5:3b").addText(
+    (text) => text.setValue(plugin.settings.llmCustomModel).onChange(async (v) => {
+      plugin.settings.llmCustomModel = v.trim();
+      plugin.settings.llmModelReady = false;
+      await plugin.saveSettings();
+      plugin.refreshLlmRibbon();
+    })
+  ).addButton((btn) => {
+    btn.setButtonText("Download via Ollama");
+    btn.onClick(async () => {
+      const host = plugin.settings.llmCustomHost || DEFAULT_OLLAMA_HOST;
+      const model = plugin.settings.llmCustomModel.trim();
+      if (!model) {
+        new import_obsidian4.Notice("\u0423\u043A\u0430\u0436\u0438\u0442\u0435 \u0438\u043C\u044F \u043C\u043E\u0434\u0435\u043B\u0438");
+        return;
+      }
+      await startModelPull(plugin, "ollama", model, progressEl, refresh, host);
+    });
+  });
+}
+async function startModelPull(plugin, backend, model, progressEl, refresh, host = DEFAULT_OLLAMA_HOST) {
+  try {
+    if (!plugin.client) await plugin.startSidecarPublic();
+    const client = plugin.ensureClientPublic();
+    if (backend === "ollama") {
+      const health = await client.llmStatus(host, model, "ollama");
+      if (!health.health.ok) {
+        new import_obsidian4.Notice(`Ollama \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D: ${health.health.error ?? "\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 Ollama"}`);
+        return;
+      }
+    }
+    await client.llmPull(host, model, backend);
+    new import_obsidian4.Notice(`\u0421\u043A\u0430\u0447\u0438\u0432\u0430\u043D\u0438\u0435 ${model}\u2026`);
+    while (true) {
+      const p = await client.llmPullStatus();
+      updateProgressEl(progressEl, p);
+      if (!p.active) {
+        if (p.error) {
+          new import_obsidian4.Notice(`\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438: ${p.error}`);
+          plugin.settings.llmModelReady = false;
+        } else {
+          plugin.settings.llmModelReady = true;
+          new import_obsidian4.Notice(`\u041C\u043E\u0434\u0435\u043B\u044C ${model} \u0433\u043E\u0442\u043E\u0432\u0430`);
+        }
+        await plugin.saveSettings();
+        refresh();
+        plugin.refreshLlmRibbon();
+        break;
+      }
+      await sleep2(600);
+    }
+  } catch (e) {
+    new import_obsidian4.Notice(String(e));
+  }
+}
+async function updateProgressDisplay(plugin, progressEl) {
+  const cfg = getActiveLlmConfig(plugin.settings);
+  if (!cfg || !plugin.client) return;
+  try {
+    const status = await plugin.ensureClientPublic().llmStatus(cfg.host, cfg.model, cfg.backend);
+    if (status.modelAvailable && !plugin.settings.llmModelReady) {
+      plugin.settings.llmModelReady = true;
+      await plugin.saveSettings();
+      plugin.refreshLlmRibbon();
+    }
+    if (status.pull.active) {
+      updateProgressEl(progressEl, status.pull);
+    }
+  } catch {
+  }
+}
+function updateProgressEl(el, p) {
+  el.empty();
+  if (p.active || p.status === "success") {
+    el.createEl("p", {
+      text: p.active ? `\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430: ${p.status} ${p.percent > 0 ? `${p.percent}%` : ""}` : p.error ? `\u041E\u0448\u0438\u0431\u043A\u0430: ${p.error}` : "\u041C\u043E\u0434\u0435\u043B\u044C \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u0430"
+    });
+  }
+}
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
@@ -497,11 +715,16 @@ var DEFAULT_SETTINGS = {
   autoStart: true,
   serverPort: 18432,
   autoReindexOnChange: true,
-  stopServerOnQuit: false
+  stopServerOnQuit: false,
+  llmMode: "off",
+  llmPresetModel: "",
+  llmCustomHost: "http://127.0.0.1:11434",
+  llmCustomModel: "",
+  llmModelReady: false
 };
 
 // src/settings.ts
-var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab {
+var ObsidianContextSettingTab = class extends import_obsidian5.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -513,19 +736,19 @@ var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab 
     const pluginDir = resolvePluginDir(this.app, this.plugin.manifest);
     const bundled = hasBundledSidecar(pluginDir);
     const serverPath = activeSidecarPath(pluginDir, this.plugin.settings.pythonCommand);
-    new import_obsidian4.Setting(containerEl).setName("Program folder").setDesc(pluginDir);
-    new import_obsidian4.Setting(containerEl).setName("Vault server").setDesc(
+    new import_obsidian5.Setting(containerEl).setName("Program folder").setDesc(pluginDir);
+    new import_obsidian5.Setting(containerEl).setName("Vault server").setDesc(
       bundled ? `\u0412\u0441\u0442\u0440\u043E\u0435\u043D \u0432 \u043F\u043B\u0430\u0433\u0438\u043D: ${serverPath}` : "\u0421\u0435\u0440\u0432\u0435\u0440 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0432 plugin/. \u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 scripts/install-obsidian-plugin.sh"
     );
     if (!bundled) {
-      new import_obsidian4.Setting(containerEl).setName("Python command (dev fallback)").setDesc("\u0422\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u043A\u0438, \u0435\u0441\u043B\u0438 server/.venv \u043D\u0435 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D").addText(
+      new import_obsidian5.Setting(containerEl).setName("Python command (dev fallback)").setDesc("\u0422\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u043A\u0438, \u0435\u0441\u043B\u0438 server/.venv \u043D\u0435 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D").addText(
         (text) => text.setPlaceholder("obsidian-context-mcp").setValue(this.plugin.settings.pythonCommand).onChange(async (v) => {
           this.plugin.settings.pythonCommand = v.trim() || DEFAULT_SETTINGS.pythonCommand;
           await this.plugin.saveSettings();
         })
       );
     }
-    new import_obsidian4.Setting(containerEl).setName("MCP server port").setDesc(
+    new import_obsidian5.Setting(containerEl).setName("MCP server port").setDesc(
       "\u0424\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u0434\u043B\u044F Cursor MCP (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E 18432). 0 = \u0441\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u043F\u0440\u0438 \u043A\u0430\u0436\u0434\u043E\u043C \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u2014 \u0442\u043E\u0433\u0434\u0430 \u043F\u043E\u0441\u043B\u0435 \u0440\u0435\u0441\u0442\u0430\u0440\u0442\u0430 \u043D\u0443\u0436\u043D\u043E \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C .cursor/mcp.json. \u041F\u043E\u0441\u043B\u0435 \u0441\u043C\u0435\u043D\u044B \u043F\u043E\u0440\u0442\u0430 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 Restart server."
     ).addText(
       (text) => text.setPlaceholder("18432").setValue(String(this.plugin.settings.serverPort)).onChange(async (v) => {
@@ -536,15 +759,15 @@ var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab 
     );
     const runtimePort = this.plugin.getRuntimePort();
     if (runtimePort !== null) {
-      new import_obsidian4.Setting(containerEl).setName("Current server URL").setDesc(`http://127.0.0.1:${runtimePort}/sse \u2014 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439\u0442\u0435 \u044D\u0442\u043E\u0442 \u043F\u043E\u0440\u0442 \u0432 Cursor MCP config`);
+      new import_obsidian5.Setting(containerEl).setName("Current server URL").setDesc(`http://127.0.0.1:${runtimePort}/sse \u2014 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439\u0442\u0435 \u044D\u0442\u043E\u0442 \u043F\u043E\u0440\u0442 \u0432 Cursor MCP config`);
     }
-    new import_obsidian4.Setting(containerEl).setName("Auto-start sidecar").setDesc("Start vault-server when Obsidian loads the vault").addToggle(
+    new import_obsidian5.Setting(containerEl).setName("Auto-start sidecar").setDesc("Start vault-server when Obsidian loads the vault").addToggle(
       (t) => t.setValue(this.plugin.settings.autoStart).onChange(async (v) => {
         this.plugin.settings.autoStart = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("Auto-reindex on change").setDesc(
+    new import_obsidian5.Setting(containerEl).setName("Auto-reindex on change").setDesc(
       "\u041E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 MCP \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0430\u0432\u043E\u043A .md \u0432 vault \u2014 \u0447\u0435\u0440\u0435\u0437 2 \u043C\u0438\u043D\u0443\u0442\u044B \u0431\u0435\u0437 \u043D\u043E\u0432\u044B\u0445 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0439"
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.autoReindexOnChange).onChange(async (v) => {
@@ -553,7 +776,7 @@ var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab 
         this.plugin.setupVaultAutoIndex();
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("Stop server on quit").setDesc(
+    new import_obsidian5.Setting(containerEl).setName("Stop server on quit").setDesc(
       "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C vault-server \u043F\u0440\u0438 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u0438 Obsidian. \u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u0434\u043B\u044F Cursor MCP \u0432 \u0444\u043E\u043D\u0435."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.stopServerOnQuit).onChange(async (v) => {
@@ -561,21 +784,22 @@ var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab 
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("Index status").setDesc(this.plugin.statusText).addButton((btn) => {
+    new import_obsidian5.Setting(containerEl).setName("Index status").setDesc(this.plugin.statusText).addButton((btn) => {
       btn.setButtonText("Reindex").onClick(() => {
         void this.runAction(btn, "Reindex", () => this.plugin.reindexVault());
       });
     });
-    new import_obsidian4.Setting(containerEl).setName("Restart server").setDesc("\u041F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C vault-server").addButton((btn) => {
+    new import_obsidian5.Setting(containerEl).setName("Restart server").setDesc("\u041F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C vault-server").addButton((btn) => {
       btn.setButtonText("Restart").onClick(() => {
         void this.runAction(btn, "Restart", () => this.plugin.restartSidecarIfNeeded());
       });
     });
-    new import_obsidian4.Setting(containerEl).setName("Access scopes").setDesc("Manage Cursor access to specific vault folders").addButton((btn) => {
+    new import_obsidian5.Setting(containerEl).setName("Access scopes").setDesc("Manage Cursor access to specific vault folders").addButton((btn) => {
       btn.setButtonText("Open scopes").onClick(() => {
         void this.runAction(btn, "Open scopes", () => this.plugin.openScopesModal());
       });
     });
+    renderLlmSettings(containerEl, this.plugin);
   }
   async runAction(btn, label, action) {
     btn.setDisabled(true);
@@ -584,7 +808,7 @@ var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab 
       await action();
       this.display();
     } catch (e) {
-      new import_obsidian4.Notice(String(e));
+      new import_obsidian5.Notice(String(e));
       this.display();
     } finally {
       btn.setDisabled(false);
@@ -594,7 +818,7 @@ var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab 
 };
 
 // src/views/ScopesModal.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/folderScope.ts
 var ALL_VAULT_PATH = "*";
@@ -842,7 +1066,7 @@ var FolderScopePicker = class {
 };
 
 // src/views/ScopesModal.ts
-var ScopesModal = class extends import_obsidian5.Modal {
+var ScopesModal = class extends import_obsidian6.Modal {
   constructor(app, client) {
     super(app);
     this.client = client;
@@ -862,7 +1086,7 @@ var ScopesModal = class extends import_obsidian5.Modal {
     });
     this.markdownPaths = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
     this.listEl = contentEl.createDiv({ cls: "ocm-scopes-list" });
-    new import_obsidian5.Setting(contentEl).setName("\u041D\u043E\u0432\u044B\u0439 scope").setDesc("\u041E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u0439 \u0442\u043E\u043A\u0435\u043D \u0434\u043B\u044F Cursor \u0441 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u043C\u0438 \u043F\u0430\u043F\u043A\u0430\u043C\u0438").addButton(
+    new import_obsidian6.Setting(contentEl).setName("\u041D\u043E\u0432\u044B\u0439 scope").setDesc("\u041E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u0439 \u0442\u043E\u043A\u0435\u043D \u0434\u043B\u044F Cursor \u0441 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u043C\u0438 \u043F\u0430\u043F\u043A\u0430\u043C\u0438").addButton(
       (btn) => btn.setButtonText("\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope").setCta().onClick(() => {
         void this.addScope(btn);
       })
@@ -888,9 +1112,9 @@ var ScopesModal = class extends import_obsidian5.Modal {
       });
       await this.reload();
       this.renderList();
-      new import_obsidian5.Notice("Scope \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D \u2014 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438");
+      new import_obsidian6.Notice("Scope \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D \u2014 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438");
     } catch (e) {
-      new import_obsidian5.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope: ${e}`);
+      new import_obsidian6.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope: ${e}`);
     } finally {
       btn.setDisabled(false);
       btn.setButtonText(label);
@@ -915,7 +1139,7 @@ var ScopesModal = class extends import_obsidian5.Modal {
   }
   renderScopeBlock(scope) {
     const block = this.listEl.createDiv({ cls: "ocm-scope-block" });
-    new import_obsidian5.Setting(block).setName("\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435").addText(
+    new import_obsidian6.Setting(block).setName("\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435").addText(
       (t) => t.setValue(scope.name).onChange(async (v) => {
         scope.name = v.trim() || scope.name;
         await this.saveScope(scope);
@@ -943,19 +1167,19 @@ var ScopesModal = class extends import_obsidian5.Modal {
       updatePreview();
       if (saveTimer !== null) window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(() => {
-        void this.applyPicker(scope, picker).catch((e) => new import_obsidian5.Notice(String(e)));
+        void this.applyPicker(scope, picker).catch((e) => new import_obsidian6.Notice(String(e)));
       }, 400);
     });
     updatePreview();
-    new import_obsidian5.Setting(block).setName("Scope ID").setDesc(scope.id).addText((t) => t.setValue(scope.id).setDisabled(true));
-    new import_obsidian5.Setting(block).setName("Cursor MCP").addButton(
+    new import_obsidian6.Setting(block).setName("Scope ID").setDesc(scope.id).addText((t) => t.setValue(scope.id).setDisabled(true));
+    new import_obsidian6.Setting(block).setName("Cursor MCP").addButton(
       (btn) => btn.setButtonText("Copy JSON").onClick(async () => {
         try {
           const res = await this.client.cursorConfig(scope.id);
           await navigator.clipboard.writeText(JSON.stringify(res.config, null, 2));
-          new import_obsidian5.Notice("\u041A\u043E\u043D\u0444\u0438\u0433 Cursor \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D");
+          new import_obsidian6.Notice("\u041A\u043E\u043D\u0444\u0438\u0433 Cursor \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D");
         } catch (e) {
-          new import_obsidian5.Notice(`Copy failed: ${e}`);
+          new import_obsidian6.Notice(`Copy failed: ${e}`);
         }
       })
     ).addButton(
@@ -963,7 +1187,7 @@ var ScopesModal = class extends import_obsidian5.Modal {
         await this.client.regenerateToken(scope.id);
         await this.reload();
         this.renderList();
-        new import_obsidian5.Notice("\u0422\u043E\u043A\u0435\u043D \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D \u2014 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433 \u0432 Cursor");
+        new import_obsidian6.Notice("\u0422\u043E\u043A\u0435\u043D \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D \u2014 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433 \u0432 Cursor");
       })
     ).addButton(
       (btn) => btn.setButtonText("Delete").setWarning().onClick(async () => {
@@ -1010,8 +1234,8 @@ var ScopesModal = class extends import_obsidian5.Modal {
 };
 
 // src/views/SearchModal.ts
-var import_obsidian6 = require("obsidian");
-var SearchModal = class extends import_obsidian6.Modal {
+var import_obsidian7 = require("obsidian");
+var SearchModal = class extends import_obsidian7.Modal {
   constructor(app, client) {
     super(app);
     this.client = client;
@@ -1021,7 +1245,7 @@ var SearchModal = class extends import_obsidian6.Modal {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Semantic search" });
     let query = "";
-    new import_obsidian6.Setting(contentEl).setName("Query").addText(
+    new import_obsidian7.Setting(contentEl).setName("Query").addText(
       (text) => text.setPlaceholder("Search vault...").onChange((v) => {
         query = v;
       })
@@ -1032,7 +1256,7 @@ var SearchModal = class extends import_obsidian6.Modal {
           this.results = res.results;
           this.renderResults();
         } catch (e) {
-          new import_obsidian6.Notice(`Search failed: ${e}`);
+          new import_obsidian7.Notice(`Search failed: ${e}`);
         }
       })
     );
@@ -1060,8 +1284,92 @@ var SearchModal = class extends import_obsidian6.Modal {
   }
 };
 
+// src/views/LlmSearchModal.ts
+var import_obsidian8 = require("obsidian");
+var LlmSearchModal = class extends import_obsidian8.Modal {
+  constructor(app, plugin, client) {
+    super(app);
+    this.plugin = plugin;
+    this.client = client;
+  }
+  onOpen() {
+    const cfg = getActiveLlmConfig(this.plugin.settings);
+    if (!cfg) {
+      new import_obsidian8.Notice("LLM \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D. Settings \u2192 Obsidian Context MCP \u2192 Vault LLM");
+      this.close();
+      return;
+    }
+    const { contentEl, modalEl } = this;
+    modalEl.addClass("ocm-llm-modal");
+    contentEl.createEl("h2", { text: "\u0421\u043F\u0440\u043E\u0441\u0438\u0442\u044C vault (LLM)" });
+    contentEl.createEl("p", {
+      cls: "ocm-muted",
+      text: `\u041C\u043E\u0434\u0435\u043B\u044C: ${cfg.model} \xB7 \u043F\u043E\u0438\u0441\u043A \u043F\u043E \u0438\u043D\u0434\u0435\u043A\u0441\u0443 + \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u043E\u0442\u0432\u0435\u0442`
+    });
+    let query = "";
+    new import_obsidian8.Setting(contentEl).setName("\u0412\u043E\u043F\u0440\u043E\u0441").addText(
+      (text) => text.setPlaceholder("\u041A\u0430\u043A \u043D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C scopes \u0434\u043B\u044F Cursor?").onChange((v) => {
+        query = v;
+      })
+    ).addButton(
+      (btn) => btn.setButtonText("\u0421\u043F\u0440\u043E\u0441\u0438\u0442\u044C").setCta().onClick(() => void this.runAsk(query, btn))
+    );
+    this.answerEl = contentEl.createDiv({ cls: "ocm-llm-answer" });
+    this.sourcesEl = contentEl.createDiv({ cls: "ocm-llm-sources" });
+  }
+  async runAsk(query, btn) {
+    const cfg = getActiveLlmConfig(this.plugin.settings);
+    if (!cfg) return;
+    const q = query.trim();
+    if (!q) {
+      new import_obsidian8.Notice("\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0432\u043E\u043F\u0440\u043E\u0441");
+      return;
+    }
+    btn.setDisabled(true);
+    btn.setButtonText("\u2026");
+    this.answerEl.empty();
+    this.sourcesEl.empty();
+    this.answerEl.createEl("p", { text: "\u0414\u0443\u043C\u0430\u044E\u2026 (\u043C\u043E\u0436\u0435\u0442 \u0437\u0430\u043D\u044F\u0442\u044C \u043C\u0438\u043D\u0443\u0442\u0443 \u043D\u0430 CPU)" });
+    try {
+      const res = await this.client.llmAsk(q, cfg.host, cfg.model, cfg.backend);
+      this.answerEl.empty();
+      this.answerEl.createEl("div", { cls: "ocm-llm-answer-text", text: res.answer });
+      this.renderSources(res.sources);
+    } catch (e) {
+      this.answerEl.empty();
+      this.answerEl.createEl("p", { text: String(e), cls: "ocm-llm-error" });
+      new import_obsidian8.Notice(String(e));
+    } finally {
+      btn.setDisabled(false);
+      btn.setButtonText("\u0421\u043F\u0440\u043E\u0441\u0438\u0442\u044C");
+    }
+  }
+  renderSources(sources) {
+    this.sourcesEl.empty();
+    if (!sources.length) return;
+    this.sourcesEl.createEl("h3", { text: "\u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438" });
+    for (const s of sources) {
+      const item = this.sourcesEl.createDiv({ cls: "ocm-search-item" });
+      item.createEl("strong", {
+        text: `${s.title} (${(s.score * 100).toFixed(0)}%)`
+      });
+      item.createEl("div", { text: s.relative_path, cls: "ocm-muted" });
+      if (s.excerpt) {
+        item.createEl("p", { text: s.excerpt + (s.excerpt.length >= 200 ? "\u2026" : "") });
+      }
+      item.onclick = async () => {
+        const file = this.app.vault.getAbstractFileByPath(s.relative_path);
+        if (file) await this.app.workspace.getLeaf().openFile(file);
+      };
+    }
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
 // src/vaultAutoIndex.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 var AUTO_INDEX_IDLE_MS = 2 * 60 * 1e3;
 var SKIP_PREFIXES2 = [".obsidian/", ".trash/"];
 function shouldIndex(path3) {
@@ -1090,23 +1398,23 @@ var VaultAutoIndexer = class {
     };
     track(
       this.app.vault.on("create", (file) => {
-        if (file instanceof import_obsidian7.TFile) markChanged(file.path);
+        if (file instanceof import_obsidian9.TFile) markChanged(file.path);
       })
     );
     track(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian7.TFile) markChanged(file.path);
+        if (file instanceof import_obsidian9.TFile) markChanged(file.path);
       })
     );
     track(
       this.app.vault.on("delete", (file) => {
-        if (file instanceof import_obsidian7.TFile) markChanged(file.path);
+        if (file instanceof import_obsidian9.TFile) markChanged(file.path);
       })
     );
     track(
       this.app.vault.on("rename", (file, oldPath) => {
         if (oldPath && shouldIndex(oldPath)) markChanged(oldPath);
-        if (file instanceof import_obsidian7.TFile) markChanged(file.path);
+        if (file instanceof import_obsidian9.TFile) markChanged(file.path);
       })
     );
   }
@@ -1151,7 +1459,7 @@ var VaultAutoIndexer = class {
 };
 
 // src/main.ts
-var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
+var ObsidianContextPlugin = class extends import_obsidian10.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -1161,6 +1469,7 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
     this.startPromise = null;
     this.settingTab = null;
     this.vaultAutoIndexer = null;
+    this.llmRibbonEl = null;
     this.statusText = "Not started";
   }
   async onload() {
@@ -1173,7 +1482,7 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
       const vaultPath = this.getVaultPath();
       if (!vaultPath) {
         this.statusText = "\u041D\u0443\u0436\u0435\u043D \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault (\u043D\u0435 \u043E\u0431\u043B\u0430\u0447\u043D\u044B\u0439 \u0431\u0435\u0437 basePath)";
-        new import_obsidian8.Notice("Obsidian Context MCP: \u043E\u0442\u043A\u0440\u043E\u0439 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault \u0438\u043B\u0438 \u0443\u043A\u0430\u0436\u0438 Python command \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445.");
+        new import_obsidian10.Notice("Obsidian Context MCP: \u043E\u0442\u043A\u0440\u043E\u0439 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault \u0438\u043B\u0438 \u0443\u043A\u0430\u0436\u0438 Python command \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445.");
         return;
       }
       this.sidecar = new SidecarManager(
@@ -1187,6 +1496,11 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
         id: "ocm-semantic-search",
         name: "Semantic search vault",
         callback: () => void this.openSearchModal()
+      });
+      this.addCommand({
+        id: "ocm-llm-search",
+        name: "Ask vault (LLM)",
+        callback: () => void this.openLlmSearchModal()
       });
       this.addCommand({
         id: "ocm-reindex",
@@ -1208,18 +1522,19 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
       });
       const statusItem = this.addStatusBarItem();
       statusItem.setText("OCM");
-      (0, import_obsidian8.setTooltip)(statusItem, this.statusText);
+      (0, import_obsidian10.setTooltip)(statusItem, this.statusText);
       statusItem.onClickEvent(() => void this.openSearchModal());
       if (this.settings.autoStart) {
         window.setTimeout(() => {
-          void this.startSidecar().catch((e) => new import_obsidian8.Notice(String(e)));
+          void this.startSidecar().catch((e) => new import_obsidian10.Notice(String(e)));
         }, 500);
       }
       this.setupVaultAutoIndex();
+      this.refreshLlmRibbon();
     } catch (e) {
       console.error("[obsidian-context-mcp] onload failed:", e);
       this.statusText = `Plugin error: ${e}`;
-      new import_obsidian8.Notice(`Obsidian Context MCP: \u043E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u2014 ${e}`);
+      new import_obsidian10.Notice(`Obsidian Context MCP: \u043E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u2014 ${e}`);
     }
   }
   refreshSettingsDisplay() {
@@ -1267,11 +1582,12 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
     this.client = null;
     this.runtime = null;
     await this.startSidecar();
-    new import_obsidian8.Notice("vault-server \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0449\u0435\u043D");
+    new import_obsidian10.Notice("vault-server \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0449\u0435\u043D");
   }
   async onunload() {
     this.vaultAutoIndexer?.detach();
     this.vaultAutoIndexer = null;
+    this.llmRibbonEl = null;
     if (this.settings.stopServerOnQuit) {
       try {
         await this.sidecar?.forceStopForRestart();
@@ -1303,6 +1619,7 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
       this.client = SidecarClient.fromRuntime(this.runtime);
       const status = await this.client.status();
       this.applyVaultStatus(status);
+      void this.syncLlmModelReady();
     } catch (e) {
       console.error("[obsidian-context-mcp] startSidecar:", e);
       this.statusText = `Error: ${e}`;
@@ -1317,12 +1634,43 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
     }
     return this.client;
   }
+  /** Public wrapper for settings UI. */
+  ensureClientPublic() {
+    return this.ensureClient();
+  }
+  async startSidecarPublic() {
+    return this.startSidecar();
+  }
+  refreshLlmRibbon() {
+    const show = isLlmUiEnabled(this.settings) && this.settings.llmModelReady;
+    if (show && !this.llmRibbonEl) {
+      this.llmRibbonEl = this.addRibbonIcon("message-circle", "\u0421\u043F\u0440\u043E\u0441\u0438\u0442\u044C vault (LLM)", () => {
+        void this.openLlmSearchModal();
+      });
+    } else if (!show && this.llmRibbonEl) {
+      this.llmRibbonEl.remove();
+      this.llmRibbonEl = null;
+    }
+  }
+  async openLlmSearchModal() {
+    try {
+      if (!this.client) await this.startSidecar();
+      if (!this.settings.llmModelReady) {
+        new import_obsidian10.Notice("\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0441\u043A\u0430\u0447\u0430\u0439\u0442\u0435 \u043C\u043E\u0434\u0435\u043B\u044C \u0432 Settings \u2192 Vault LLM");
+        return;
+      }
+      new LlmSearchModal(this.app, this, this.ensureClient()).open();
+    } catch (e) {
+      new import_obsidian10.Notice(String(e));
+      throw e;
+    }
+  }
   async openSearchModal() {
     try {
       if (!this.client) await this.startSidecar();
       new SearchModal(this.app, this.ensureClient()).open();
     } catch (e) {
-      new import_obsidian8.Notice(String(e));
+      new import_obsidian10.Notice(String(e));
       throw e;
     }
   }
@@ -1331,7 +1679,7 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
       if (!this.client) await this.startSidecar();
       new ScopesModal(this.app, this.ensureClient()).open();
     } catch (e) {
-      new import_obsidian8.Notice(String(e));
+      new import_obsidian10.Notice(String(e));
       throw e;
     }
   }
@@ -1340,6 +1688,20 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
     this.vaultAutoIndexer?.detach();
     this.vaultAutoIndexer = new VaultAutoIndexer(this.app, () => this.client);
     this.vaultAutoIndexer.attach((ref) => this.registerEvent(ref));
+  }
+  async syncLlmModelReady() {
+    const cfg = getActiveLlmConfig(this.settings);
+    if (!cfg || !this.client) return;
+    try {
+      const status = await this.client.llmStatus(cfg.host, cfg.model, cfg.backend);
+      if (status.modelAvailable !== this.settings.llmModelReady) {
+        this.settings.llmModelReady = status.modelAvailable;
+        await this.saveSettings();
+        this.refreshLlmRibbon();
+        this.refreshSettingsDisplay();
+      }
+    } catch {
+    }
   }
   async reindexVault() {
     try {
@@ -1350,7 +1712,7 @@ var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
       const status = await client.status();
       this.applyVaultStatus(status);
     } catch (e) {
-      new import_obsidian8.Notice(String(e));
+      new import_obsidian10.Notice(String(e));
       throw e;
     }
   }
