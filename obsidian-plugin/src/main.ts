@@ -7,6 +7,7 @@ import { ObsidianContextSettingTab } from "./settings";
 import { DEFAULT_SETTINGS, PluginSettings, VaultRuntimeInfo } from "./types";
 import { ScopesModal } from "./views/ScopesModal";
 import { SearchModal } from "./views/SearchModal";
+import { VaultAutoIndexer } from "./vaultAutoIndex";
 
 export default class ObsidianContextPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
@@ -15,6 +16,7 @@ export default class ObsidianContextPlugin extends Plugin {
   private runtime: VaultRuntimeInfo | null = null;
   private startPromise: Promise<void> | null = null;
   private settingTab: ObsidianContextSettingTab | null = null;
+  private vaultAutoIndexer: VaultAutoIndexer | null = null;
   statusText = "Not started";
 
   async onload() {
@@ -36,7 +38,8 @@ export default class ObsidianContextPlugin extends Plugin {
         vaultPath,
         pluginDir,
         dataDir,
-        this.settings.pythonCommand
+        this.settings.pythonCommand,
+        this.settings.serverPort
       );
 
       this.addCommand({
@@ -78,6 +81,8 @@ export default class ObsidianContextPlugin extends Plugin {
           void this.startSidecar().catch((e) => new Notice(String(e)));
         }, 500);
       }
+
+      this.setupVaultAutoIndex();
     } catch (e) {
       console.error("[obsidian-context-mcp] onload failed:", e);
       this.statusText = `Plugin error: ${e}`;
@@ -87,6 +92,10 @@ export default class ObsidianContextPlugin extends Plugin {
 
   refreshSettingsDisplay(): void {
     this.settingTab?.display();
+  }
+
+  getRuntimePort(): number | null {
+    return this.sidecar?.readRuntime()?.port ?? this.runtime?.port ?? null;
   }
 
   private applyVaultStatus(status: { fileCount: number; vaultFileCount?: number; indexStatus: string }): void {
@@ -115,7 +124,8 @@ export default class ObsidianContextPlugin extends Plugin {
       vaultPath,
       pluginDir,
       dataDir,
-      this.settings.pythonCommand
+      this.settings.pythonCommand,
+      this.settings.serverPort
     );
     return this.sidecar;
   }
@@ -134,6 +144,8 @@ export default class ObsidianContextPlugin extends Plugin {
   }
 
   async onunload() {
+    this.vaultAutoIndexer?.detach();
+    this.vaultAutoIndexer = null;
     if (this.settings.stopServerOnQuit) {
       try {
         await this.sidecar?.forceStopForRestart();
@@ -203,6 +215,13 @@ export default class ObsidianContextPlugin extends Plugin {
       new Notice(String(e));
       throw e;
     }
+  }
+
+  setupVaultAutoIndex(): void {
+    if (!this.settings.autoReindexOnChange) return;
+    this.vaultAutoIndexer?.detach();
+    this.vaultAutoIndexer = new VaultAutoIndexer(this.app, () => this.client);
+    this.vaultAutoIndexer.attach((ref) => this.registerEvent(ref));
   }
 
   async reindexVault() {

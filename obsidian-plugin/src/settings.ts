@@ -49,12 +49,51 @@ export class ObsidianContextSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
+      .setName("MCP server port")
+      .setDesc(
+        "Фиксированный порт для Cursor MCP (по умолчанию 18432). 0 = случайный порт при каждом запуске — тогда после рестарта нужно обновлять .cursor/mcp.json. После смены порта нажмите Restart server."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("18432")
+          .setValue(String(this.plugin.settings.serverPort))
+          .onChange(async (v) => {
+            const n = Number.parseInt(v.trim(), 10);
+            this.plugin.settings.serverPort =
+              Number.isFinite(n) && n >= 0 && n <= 65535
+                ? n
+                : DEFAULT_SETTINGS.serverPort;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    const runtimePort = this.plugin.getRuntimePort();
+    if (runtimePort !== null) {
+      new Setting(containerEl)
+        .setName("Current server URL")
+        .setDesc(`http://127.0.0.1:${runtimePort}/sse — используйте этот порт в Cursor MCP config`);
+    }
+
+    new Setting(containerEl)
       .setName("Auto-start sidecar")
       .setDesc("Start vault-server when Obsidian loads the vault")
       .addToggle((t) =>
         t.setValue(this.plugin.settings.autoStart).onChange(async (v) => {
           this.plugin.settings.autoStart = v;
           await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Auto-reindex on change")
+      .setDesc(
+        "Обновлять индекс MCP после правок .md в vault — через 2 минуты без новых сохранений"
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.autoReindexOnChange).onChange(async (v) => {
+          this.plugin.settings.autoReindexOnChange = v;
+          await this.plugin.saveSettings();
+          this.plugin.setupVaultAutoIndex();
         })
       );
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from obsidian_context_mcp.core.diagnostics import run_diagnostics_for_vault
+from obsidian_context_mcp.core.indexer import Indexer
 from obsidian_context_mcp.core.retrieval import Retriever
 from obsidian_context_mcp.core.scope_filter import filter_paths
 from obsidian_context_mcp.core.scope_store import generate_scope_token
@@ -65,6 +67,18 @@ class AdminApi:
         mode = IndexMode.FULL if body.get("mode") == "full" else IndexMode.INCREMENTAL
         progress = VaultIndexQueue.get().start(self.vault_ctx, mode)
         return JSONResponse(progress.model_dump())
+
+    async def index_file(self, request: Request) -> Response:
+        body = await request.json()
+        rel = body.get("relativePath") or body.get("relative_path")
+        if not rel or not isinstance(rel, str):
+            return JSONResponse({"error": "relativePath required"}, status_code=400)
+        rel_norm = rel.replace("\\", "/").lstrip("/")
+        try:
+            await asyncio.to_thread(Indexer(self.vault_ctx).index_file, rel_norm)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse({"ok": True, "relativePath": rel_norm})
 
     async def list_scopes(self, _request: Request) -> Response:
         scopes = self.vault_ctx.scope_store.list_scopes()

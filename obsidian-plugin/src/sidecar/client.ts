@@ -51,6 +51,13 @@ export class SidecarClient {
     });
   }
 
+  indexFile(relativePath: string) {
+    return this.request<{ ok: boolean; relativePath: string }>("/api/v1/index-file", {
+      method: "POST",
+      body: JSON.stringify({ relativePath }),
+    });
+  }
+
   listScopes() {
     return this.request<{ scopes: AccessScope[] }>("/api/v1/scopes");
   }

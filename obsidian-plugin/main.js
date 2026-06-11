@@ -32,7 +32,7 @@ __export(main_exports, {
   default: () => ObsidianContextPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 
 // src/sidecar/client.ts
 var import_obsidian = require("obsidian");
@@ -75,6 +75,12 @@ var SidecarClient = class _SidecarClient {
     return this.request("/api/v1/reindex", {
       method: "POST",
       body: JSON.stringify({ mode })
+    });
+  }
+  indexFile(relativePath) {
+    return this.request("/api/v1/index-file", {
+      method: "POST",
+      body: JSON.stringify({ relativePath })
     });
   }
   listScopes() {
@@ -211,7 +217,7 @@ function logVaultServerLine(text, stream) {
   }
 }
 var SidecarManager = class {
-  constructor(vaultPath, pluginDir, dataDir, pythonCommand) {
+  constructor(vaultPath, pluginDir, dataDir, pythonCommand, serverPort) {
     this.process = null;
     this.ownsProcess = false;
     this.startPromise = null;
@@ -219,6 +225,7 @@ var SidecarManager = class {
     this.pluginDir = path2.resolve(pluginDir);
     this.dataDir = path2.resolve(dataDir);
     this.pythonCommand = pythonCommand;
+    this.serverPort = serverPort;
     fs2.mkdirSync(this.dataDir, { recursive: true });
   }
   get runtimePath() {
@@ -327,7 +334,7 @@ var SidecarManager = class {
             "--host",
             "127.0.0.1",
             "--port",
-            "0"
+            String(this.serverPort)
           ],
           {
             stdio: ["ignore", "pipe", "pipe"],
@@ -488,6 +495,8 @@ var DEFAULT_SETTINGS = {
   pythonCommand: "obsidian-context-mcp",
   sidecarArgs: "",
   autoStart: true,
+  serverPort: 18432,
+  autoReindexOnChange: true,
   stopServerOnQuit: false
 };
 
@@ -516,10 +525,32 @@ var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab 
         })
       );
     }
+    new import_obsidian4.Setting(containerEl).setName("MCP server port").setDesc(
+      "\u0424\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u0434\u043B\u044F Cursor MCP (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E 18432). 0 = \u0441\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u043F\u0440\u0438 \u043A\u0430\u0436\u0434\u043E\u043C \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u2014 \u0442\u043E\u0433\u0434\u0430 \u043F\u043E\u0441\u043B\u0435 \u0440\u0435\u0441\u0442\u0430\u0440\u0442\u0430 \u043D\u0443\u0436\u043D\u043E \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C .cursor/mcp.json. \u041F\u043E\u0441\u043B\u0435 \u0441\u043C\u0435\u043D\u044B \u043F\u043E\u0440\u0442\u0430 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 Restart server."
+    ).addText(
+      (text) => text.setPlaceholder("18432").setValue(String(this.plugin.settings.serverPort)).onChange(async (v) => {
+        const n = Number.parseInt(v.trim(), 10);
+        this.plugin.settings.serverPort = Number.isFinite(n) && n >= 0 && n <= 65535 ? n : DEFAULT_SETTINGS.serverPort;
+        await this.plugin.saveSettings();
+      })
+    );
+    const runtimePort = this.plugin.getRuntimePort();
+    if (runtimePort !== null) {
+      new import_obsidian4.Setting(containerEl).setName("Current server URL").setDesc(`http://127.0.0.1:${runtimePort}/sse \u2014 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439\u0442\u0435 \u044D\u0442\u043E\u0442 \u043F\u043E\u0440\u0442 \u0432 Cursor MCP config`);
+    }
     new import_obsidian4.Setting(containerEl).setName("Auto-start sidecar").setDesc("Start vault-server when Obsidian loads the vault").addToggle(
       (t) => t.setValue(this.plugin.settings.autoStart).onChange(async (v) => {
         this.plugin.settings.autoStart = v;
         await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian4.Setting(containerEl).setName("Auto-reindex on change").setDesc(
+      "\u041E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 MCP \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0430\u0432\u043E\u043A .md \u0432 vault \u2014 \u0447\u0435\u0440\u0435\u0437 2 \u043C\u0438\u043D\u0443\u0442\u044B \u0431\u0435\u0437 \u043D\u043E\u0432\u044B\u0445 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0439"
+    ).addToggle(
+      (t) => t.setValue(this.plugin.settings.autoReindexOnChange).onChange(async (v) => {
+        this.plugin.settings.autoReindexOnChange = v;
+        await this.plugin.saveSettings();
+        this.plugin.setupVaultAutoIndex();
       })
     );
     new import_obsidian4.Setting(containerEl).setName("Stop server on quit").setDesc(
@@ -1029,8 +1060,98 @@ var SearchModal = class extends import_obsidian6.Modal {
   }
 };
 
+// src/vaultAutoIndex.ts
+var import_obsidian7 = require("obsidian");
+var AUTO_INDEX_IDLE_MS = 2 * 60 * 1e3;
+var SKIP_PREFIXES2 = [".obsidian/", ".trash/"];
+function shouldIndex(path3) {
+  const p = path3.replace(/\\/g, "/");
+  if (!p.toLowerCase().endsWith(".md")) return false;
+  return !SKIP_PREFIXES2.some((pre) => p.startsWith(pre));
+}
+var VaultAutoIndexer = class {
+  constructor(app, getClient, idleMs = AUTO_INDEX_IDLE_MS) {
+    this.app = app;
+    this.getClient = getClient;
+    this.idleMs = idleMs;
+    this.changedPaths = /* @__PURE__ */ new Set();
+    this.idleTimer = null;
+    this.eventRefs = [];
+  }
+  attach(registerEvent) {
+    const markChanged = (path3) => {
+      if (!shouldIndex(path3)) return;
+      this.changedPaths.add(path3);
+      this.resetIdleTimer();
+    };
+    const track = (ref) => {
+      this.eventRefs.push(ref);
+      registerEvent(ref);
+    };
+    track(
+      this.app.vault.on("create", (file) => {
+        if (file instanceof import_obsidian7.TFile) markChanged(file.path);
+      })
+    );
+    track(
+      this.app.vault.on("modify", (file) => {
+        if (file instanceof import_obsidian7.TFile) markChanged(file.path);
+      })
+    );
+    track(
+      this.app.vault.on("delete", (file) => {
+        if (file instanceof import_obsidian7.TFile) markChanged(file.path);
+      })
+    );
+    track(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (oldPath && shouldIndex(oldPath)) markChanged(oldPath);
+        if (file instanceof import_obsidian7.TFile) markChanged(file.path);
+      })
+    );
+  }
+  detach() {
+    this.clearIdleTimer();
+    this.changedPaths.clear();
+    this.eventRefs = [];
+  }
+  resetIdleTimer() {
+    this.clearIdleTimer();
+    this.idleTimer = window.setTimeout(() => void this.flush(), this.idleMs);
+  }
+  clearIdleTimer() {
+    if (this.idleTimer !== null) {
+      window.clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+  async flush() {
+    this.idleTimer = null;
+    if (this.changedPaths.size === 0) return;
+    const paths = [...this.changedPaths];
+    this.changedPaths.clear();
+    const client = this.getClient();
+    if (!client) {
+      for (const path3 of paths) this.changedPaths.add(path3);
+      this.resetIdleTimer();
+      return;
+    }
+    const results = await Promise.allSettled(paths.map((path3) => client.indexFile(path3)));
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status === "rejected") {
+        console.warn("[obsidian-context-mcp] auto-index failed:", paths[i], result.reason);
+        this.changedPaths.add(paths[i]);
+      }
+    }
+    if (this.changedPaths.size > 0) {
+      this.resetIdleTimer();
+    }
+  }
+};
+
 // src/main.ts
-var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
+var ObsidianContextPlugin = class extends import_obsidian8.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -1039,6 +1160,7 @@ var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
     this.runtime = null;
     this.startPromise = null;
     this.settingTab = null;
+    this.vaultAutoIndexer = null;
     this.statusText = "Not started";
   }
   async onload() {
@@ -1051,14 +1173,15 @@ var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
       const vaultPath = this.getVaultPath();
       if (!vaultPath) {
         this.statusText = "\u041D\u0443\u0436\u0435\u043D \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault (\u043D\u0435 \u043E\u0431\u043B\u0430\u0447\u043D\u044B\u0439 \u0431\u0435\u0437 basePath)";
-        new import_obsidian7.Notice("Obsidian Context MCP: \u043E\u0442\u043A\u0440\u043E\u0439 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault \u0438\u043B\u0438 \u0443\u043A\u0430\u0436\u0438 Python command \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445.");
+        new import_obsidian8.Notice("Obsidian Context MCP: \u043E\u0442\u043A\u0440\u043E\u0439 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault \u0438\u043B\u0438 \u0443\u043A\u0430\u0436\u0438 Python command \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445.");
         return;
       }
       this.sidecar = new SidecarManager(
         vaultPath,
         pluginDir,
         dataDir,
-        this.settings.pythonCommand
+        this.settings.pythonCommand,
+        this.settings.serverPort
       );
       this.addCommand({
         id: "ocm-semantic-search",
@@ -1085,21 +1208,25 @@ var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
       });
       const statusItem = this.addStatusBarItem();
       statusItem.setText("OCM");
-      (0, import_obsidian7.setTooltip)(statusItem, this.statusText);
+      (0, import_obsidian8.setTooltip)(statusItem, this.statusText);
       statusItem.onClickEvent(() => void this.openSearchModal());
       if (this.settings.autoStart) {
         window.setTimeout(() => {
-          void this.startSidecar().catch((e) => new import_obsidian7.Notice(String(e)));
+          void this.startSidecar().catch((e) => new import_obsidian8.Notice(String(e)));
         }, 500);
       }
+      this.setupVaultAutoIndex();
     } catch (e) {
       console.error("[obsidian-context-mcp] onload failed:", e);
       this.statusText = `Plugin error: ${e}`;
-      new import_obsidian7.Notice(`Obsidian Context MCP: \u043E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u2014 ${e}`);
+      new import_obsidian8.Notice(`Obsidian Context MCP: \u043E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u2014 ${e}`);
     }
   }
   refreshSettingsDisplay() {
     this.settingTab?.display();
+  }
+  getRuntimePort() {
+    return this.sidecar?.readRuntime()?.port ?? this.runtime?.port ?? null;
   }
   applyVaultStatus(status) {
     this.statusText = formatIndexStatus(
@@ -1125,7 +1252,8 @@ var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
       vaultPath,
       pluginDir,
       dataDir,
-      this.settings.pythonCommand
+      this.settings.pythonCommand,
+      this.settings.serverPort
     );
     return this.sidecar;
   }
@@ -1139,9 +1267,11 @@ var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
     this.client = null;
     this.runtime = null;
     await this.startSidecar();
-    new import_obsidian7.Notice("vault-server \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0449\u0435\u043D");
+    new import_obsidian8.Notice("vault-server \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0449\u0435\u043D");
   }
   async onunload() {
+    this.vaultAutoIndexer?.detach();
+    this.vaultAutoIndexer = null;
     if (this.settings.stopServerOnQuit) {
       try {
         await this.sidecar?.forceStopForRestart();
@@ -1192,7 +1322,7 @@ var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
       if (!this.client) await this.startSidecar();
       new SearchModal(this.app, this.ensureClient()).open();
     } catch (e) {
-      new import_obsidian7.Notice(String(e));
+      new import_obsidian8.Notice(String(e));
       throw e;
     }
   }
@@ -1201,9 +1331,15 @@ var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
       if (!this.client) await this.startSidecar();
       new ScopesModal(this.app, this.ensureClient()).open();
     } catch (e) {
-      new import_obsidian7.Notice(String(e));
+      new import_obsidian8.Notice(String(e));
       throw e;
     }
+  }
+  setupVaultAutoIndex() {
+    if (!this.settings.autoReindexOnChange) return;
+    this.vaultAutoIndexer?.detach();
+    this.vaultAutoIndexer = new VaultAutoIndexer(this.app, () => this.client);
+    this.vaultAutoIndexer.attach((ref) => this.registerEvent(ref));
   }
   async reindexVault() {
     try {
@@ -1214,7 +1350,7 @@ var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
       const status = await client.status();
       this.applyVaultStatus(status);
     } catch (e) {
-      new import_obsidian7.Notice(String(e));
+      new import_obsidian8.Notice(String(e));
       throw e;
     }
   }

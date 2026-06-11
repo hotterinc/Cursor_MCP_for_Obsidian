@@ -56,6 +56,10 @@ export interface PluginSettings {
   pythonCommand: string;
   sidecarArgs: string;
   autoStart: boolean;
+  /** MCP HTTP port. 0 = random free port (not recommended for Cursor). */
+  serverPort: number;
+  /** Reindex changed .md notes automatically via vault events. */
+  autoReindexOnChange: boolean;
   /** Stop vault-server when Obsidian exits (plugin onunload). */
   stopServerOnQuit: boolean;
 }
@@ -64,5 +68,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   pythonCommand: "obsidian-context-mcp",
   sidecarArgs: "",
   autoStart: true,
+  serverPort: 18432,
+  autoReindexOnChange: true,
   stopServerOnQuit: false,
 };

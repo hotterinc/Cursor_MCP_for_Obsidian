@@ -116,6 +116,7 @@ def create_http_app(
         Route("/api/v1/status", admin.status, methods=["GET"]),
         Route("/api/v1/search", admin.search, methods=["POST"]),
         Route("/api/v1/reindex", admin.reindex, methods=["POST"]),
+        Route("/api/v1/index-file", admin.index_file, methods=["POST"]),
         Route("/api/v1/scopes", admin.list_scopes, methods=["GET"]),
         Route("/api/v1/scopes", admin.upsert_scope, methods=["POST"]),
         Route("/api/v1/scopes/preview", admin.scope_preview, methods=["POST"]),

@@ -15,6 +15,7 @@ from obsidian_context_mcp.core.project import detect_project_context
 from obsidian_context_mcp.core.vault import validate_vault_path
 from obsidian_context_mcp.gui_backend.server import run_gui_backend
 from obsidian_context_mcp.mcp_server.server import run_mcp_server
+from obsidian_context_mcp.shared.constants import DEFAULT_VAULT_SERVER_PORT
 from obsidian_context_mcp.shared.types import IndexMode
 
 
@@ -36,7 +37,7 @@ def vault_server(
     vault_path: str = typer.Option(..., "--vault-path"),
     data_dir: str = typer.Option(..., "--data-dir"),
     host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(0, "--port"),
+    port: int = typer.Option(DEFAULT_VAULT_SERVER_PORT, "--port"),
 ) -> None:
     from obsidian_context_mcp.vault_server.server import run_vault_server
 

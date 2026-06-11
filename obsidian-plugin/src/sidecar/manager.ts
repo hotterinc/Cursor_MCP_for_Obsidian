@@ -63,17 +63,20 @@ export class SidecarManager {
   private vaultPath: string;
   private pluginDir: string;
   private pythonCommand: string;
+  private serverPort: number;
 
   constructor(
     vaultPath: string,
     pluginDir: string,
     dataDir: string,
-    pythonCommand: string
+    pythonCommand: string,
+    serverPort: number
   ) {
     this.vaultPath = vaultPath;
     this.pluginDir = path.resolve(pluginDir);
     this.dataDir = path.resolve(dataDir);
     this.pythonCommand = pythonCommand;
+    this.serverPort = serverPort;
     fs.mkdirSync(this.dataDir, { recursive: true });
   }
 
@@ -199,7 +202,7 @@ export class SidecarManager {
             "--host",
             "127.0.0.1",
             "--port",
-            "0",
+            String(this.serverPort),
           ],
           {
             stdio: ["ignore", "pipe", "pipe"],
