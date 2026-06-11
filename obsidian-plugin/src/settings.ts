@@ -59,6 +59,18 @@ export class ObsidianContextSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Stop server on quit")
+      .setDesc(
+        "Остановить vault-server при закрытии Obsidian. Выключено — сервер остаётся для Cursor MCP в фоне."
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.stopServerOnQuit).onChange(async (v) => {
+          this.plugin.settings.stopServerOnQuit = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
       .setName("Index status")
       .setDesc(this.plugin.statusText)
       .addButton((btn) => {

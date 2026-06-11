@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server import Server
@@ -56,7 +57,20 @@ async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextCon
         return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
 
 
-def create_http_app(vault_ctx: VaultContext) -> Starlette:
+def create_http_app(
+    vault_ctx: VaultContext,
+    *,
+    on_startup: Callable[[], None] | None = None,
+    on_shutdown: Callable[[], None] | None = None,
+) -> Starlette:
+    @asynccontextmanager
+    async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+        if on_startup is not None:
+            on_startup()
+        yield
+        if on_shutdown is not None:
+            on_shutdown()
+
     admin = AdminApi(vault_ctx)
     sse = SseServerTransport("/messages/")
 
@@ -114,4 +128,4 @@ def create_http_app(vault_ctx: VaultContext) -> Starlette:
         Route("/sse", handle_sse, methods=["GET"]),
         Mount("/messages/", app=authenticated_messages),
     ]
-    return Starlette(routes=routes)
+    return Starlette(routes=routes, lifespan=lifespan)

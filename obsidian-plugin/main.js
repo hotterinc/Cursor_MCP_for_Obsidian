@@ -32,7 +32,7 @@ __export(main_exports, {
   default: () => ObsidianContextPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // src/sidecar/client.ts
 var import_obsidian = require("obsidian");
@@ -60,9 +60,10 @@ var SidecarClient = class _SidecarClient {
     return this.request("/health");
   }
   status() {
-    return this.request(
-      "/api/v1/status"
-    );
+    return this.request("/api/v1/status");
+  }
+  indexJobStatus() {
+    return this.status().then((s) => s.job);
   }
   search(query, topK = 10) {
     return this.request("/api/v1/search", {
@@ -189,10 +190,31 @@ function isPidAlive(pid) {
     return false;
   }
 }
+function unlinkIfExists(filePath) {
+  try {
+    if (fs2.existsSync(filePath)) {
+      fs2.unlinkSync(filePath);
+    }
+  } catch {
+  }
+}
+function logVaultServerLine(text, stream) {
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const isError = stream === "stderr" && /\b(ERROR|Error:|Traceback|Exception|failed)\b/.test(trimmed) && !/^INFO:/.test(trimmed);
+    if (isError) {
+      console.error("[vault-server]", trimmed);
+    } else {
+      console.log("[vault-server]", trimmed);
+    }
+  }
+}
 var SidecarManager = class {
   constructor(vaultPath, pluginDir, dataDir, pythonCommand) {
     this.process = null;
     this.ownsProcess = false;
+    this.startPromise = null;
     this.vaultPath = vaultPath;
     this.pluginDir = path2.resolve(pluginDir);
     this.dataDir = path2.resolve(dataDir);
@@ -205,39 +227,86 @@ var SidecarManager = class {
   get lockPath() {
     return path2.join(this.dataDir, "locks", "vault-server.lock");
   }
-  /** Stop our process and any orphaned vault-server for this vault (user-initiated restart). */
+  readLockPid() {
+    if (!fs2.existsSync(this.lockPath)) return null;
+    try {
+      const pid = Number.parseInt(fs2.readFileSync(this.lockPath, "utf-8").trim(), 10);
+      return Number.isFinite(pid) && pid > 0 ? pid : null;
+    } catch {
+      return null;
+    }
+  }
+  collectServerPids() {
+    const pids = /* @__PURE__ */ new Set();
+    const lockPid = this.readLockPid();
+    if (lockPid) pids.add(lockPid);
+    const runtime = this.readRuntime();
+    if (runtime?.pid) pids.add(runtime.pid);
+    if (this.process?.pid) pids.add(this.process.pid);
+    return [...pids];
+  }
+  async terminatePid(pid, timeoutMs = 5e3) {
+    if (!isPidAlive(pid)) return;
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      return;
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!isPidAlive(pid)) return;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  /** Stop every vault-server instance tied to this vault data dir. */
+  async clearServerState() {
+    for (const pid of this.collectServerPids()) {
+      await this.terminatePid(pid);
+    }
+    this.process = null;
+    this.ownsProcess = false;
+    unlinkIfExists(this.lockPath);
+    unlinkIfExists(this.runtimePath);
+  }
   async forceStopForRestart() {
-    await this.stop();
-    if (fs2.existsSync(this.lockPath)) {
-      try {
-        const pid = Number.parseInt(fs2.readFileSync(this.lockPath, "utf-8").trim(), 10);
-        if (isPidAlive(pid)) {
-          process.kill(pid, "SIGTERM");
-          await new Promise((r) => setTimeout(r, 750));
-        }
-      } catch {
-      }
-      try {
-        fs2.unlinkSync(this.lockPath);
-      } catch {
-      }
-    }
-    if (fs2.existsSync(this.runtimePath)) {
-      try {
-        fs2.unlinkSync(this.runtimePath);
-      } catch {
-      }
-    }
+    this.startPromise = null;
+    await this.clearServerState();
   }
   async isHealthy(runtime) {
     return healthCheck(`http://${runtime.host}:${runtime.port}/health`, 2e3);
   }
-  async start() {
+  async prepareForStart() {
     const existing = this.readRuntime();
     if (existing && await this.isHealthy(existing)) {
       this.ownsProcess = false;
       return existing;
     }
+    const lockPid = this.readLockPid();
+    if (lockPid && isPidAlive(lockPid)) {
+      await this.clearServerState();
+    } else {
+      unlinkIfExists(this.lockPath);
+      if (!existing) {
+        unlinkIfExists(this.runtimePath);
+      }
+    }
+    return null;
+  }
+  async start() {
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.startOnce().finally(() => {
+      this.startPromise = null;
+    });
+    return this.startPromise;
+  }
+  async startOnce() {
+    const attached = await this.prepareForStart();
+    if (attached) return attached;
     return new Promise((resolve2, reject) => {
       let settled = false;
       const fail = (err) => {
@@ -260,8 +329,12 @@ var SidecarManager = class {
             "--port",
             "0"
           ],
-          { stdio: ["ignore", "pipe", "pipe"] }
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            detached: true
+          }
         );
+        this.process.unref();
       } catch (err) {
         fail(err instanceof Error ? err : new Error(String(err)));
         return;
@@ -273,44 +346,40 @@ var SidecarManager = class {
         this.ownsProcess = false;
         fail(new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C vault-server (${command}): ${err.message}`));
       });
-      this.process.stdout?.on("data", (d) => console.log("[vault-server]", d.toString()));
-      this.process.stderr?.on("data", (d) => console.error("[vault-server]", d.toString()));
+      this.process.stdout?.on("data", (d) => logVaultServerLine(d.toString(), "stdout"));
+      this.process.stderr?.on("data", (d) => logVaultServerLine(d.toString(), "stderr"));
       this.process.on("exit", (code) => {
-        console.error(`[vault-server] exited with code ${code}`);
         this.process = null;
         this.ownsProcess = false;
-        if (fs2.existsSync(this.runtimePath)) {
-          try {
-            fs2.unlinkSync(this.runtimePath);
-          } catch {
-          }
-        }
         if (!settled) {
+          console.error(`[vault-server] exited with code ${code}`);
           fail(
             new Error(
-              code === 1 ? "vault-server \u0443\u0436\u0435 \u0437\u0430\u043F\u0443\u0449\u0435\u043D \u0438\u043B\u0438 lock \u0437\u0430\u043D\u044F\u0442. \u041D\u0430\u0436\u043C\u0438\u0442\u0435 Restart server." : `vault-server \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043B\u0441\u044F \u0441 \u043A\u043E\u0434\u043E\u043C ${code}. \u0421\u043C. data/logs/vault-server.log`
+              code === 1 ? "vault-server \u043D\u0435 \u0441\u043C\u043E\u0433 \u0437\u0430\u0445\u0432\u0430\u0442\u0438\u0442\u044C lock. \u041D\u0430\u0436\u043C\u0438\u0442\u0435 Restart server \u0435\u0449\u0451 \u0440\u0430\u0437." : `vault-server \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043B\u0441\u044F \u0441 \u043A\u043E\u0434\u043E\u043C ${code}. \u0421\u043C. data/logs/vault-server.log`
             )
           );
+        } else if (code !== 0) {
+          console.warn(`[vault-server] exited with code ${code}`);
         }
       });
-      this.waitForRuntime(3e4).then((runtime) => {
+      this.waitForHealthyRuntime(3e4).then((runtime) => {
         if (settled) return;
         settled = true;
+        this.process?.stdout?.removeAllListeners("data");
+        this.process?.stderr?.removeAllListeners("data");
+        this.process?.removeAllListeners("exit");
+        this.process = null;
+        this.ownsProcess = false;
         resolve2(runtime);
       }).catch(fail);
     });
   }
   async stop() {
     if (this.process && this.ownsProcess) {
-      this.process.kill("SIGTERM");
+      await this.terminatePid(this.process.pid ?? 0);
       this.process = null;
       this.ownsProcess = false;
-      if (fs2.existsSync(this.runtimePath)) {
-        try {
-          fs2.unlinkSync(this.runtimePath);
-        } catch {
-        }
-      }
+      unlinkIfExists(this.runtimePath);
     }
   }
   readRuntime() {
@@ -329,38 +398,101 @@ var SidecarManager = class {
       return null;
     }
   }
-  waitForRuntime(timeoutMs) {
+  waitForHealthyRuntime(timeoutMs) {
     const started = Date.now();
     return new Promise((resolve2, reject) => {
       const tick = () => {
-        const runtime = this.readRuntime();
-        if (runtime?.port) {
-          resolve2(runtime);
-          return;
-        }
-        if (Date.now() - started > timeoutMs) {
-          reject(new Error("Timed out waiting for vault-server runtime.json"));
-          return;
-        }
-        setTimeout(tick, 250);
+        void (async () => {
+          const runtime = this.readRuntime();
+          if (runtime?.port && await this.isHealthy(runtime)) {
+            resolve2(runtime);
+            return;
+          }
+          if (Date.now() - started > timeoutMs) {
+            reject(new Error("Timed out waiting for vault-server HTTP endpoint"));
+            return;
+          }
+          setTimeout(tick, 250);
+        })();
       };
       tick();
     });
   }
 };
 
-// src/settings.ts
+// src/reindexProgress.ts
 var import_obsidian3 = require("obsidian");
+var MILESTONES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+function progressPercent(job) {
+  if (!job.total_files) return 0;
+  return Math.min(100, Math.floor(job.files_scanned / job.total_files * 100));
+}
+function notifyMilestones(job, notified) {
+  const pct = progressPercent(job);
+  const total = job.total_files;
+  const scanned = job.files_scanned;
+  for (const m of MILESTONES) {
+    if (pct >= m && !notified.has(m)) {
+      notified.add(m);
+      const detail = total > 0 ? ` (\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D\u043E ${scanned}/${total})` : "";
+      new import_obsidian3.Notice(`\u0418\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F: ${m}%${detail}`);
+    }
+  }
+}
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+async function watchReindexProgress(poll, timeoutMs = 36e5) {
+  const notified = /* @__PURE__ */ new Set();
+  const started = Date.now();
+  new import_obsidian3.Notice("\u0418\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F: \u0441\u0442\u0430\u0440\u0442\u2026");
+  while (Date.now() - started < timeoutMs) {
+    const job = await poll();
+    if (!job) {
+      await sleep(400);
+      continue;
+    }
+    notifyMilestones(job, notified);
+    if (job.status === "completed") {
+      if (!notified.has(100)) {
+        notified.add(100);
+        new import_obsidian3.Notice(
+          `\u0418\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F: 100% \u2014 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D\u043E ${job.files_scanned}/${job.total_files} (${job.files_indexed} \u043D\u043E\u0432\u044B\u0445, ${job.files_skipped} \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439${job.files_failed ? `, ${job.files_failed} \u043E\u0448\u0438\u0431\u043E\u043A` : ""})`
+        );
+      }
+      return job;
+    }
+    if (job.status === "failed" || job.status === "cancelled") {
+      new import_obsidian3.Notice(
+        `\u0418\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430: ${job.status}${job.error ? ` \u2014 ${job.error}` : ""}`
+      );
+      return job;
+    }
+    await sleep(400);
+  }
+  new import_obsidian3.Notice("\u0418\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F: \u043F\u0440\u0435\u0432\u044B\u0448\u0435\u043D\u043E \u0432\u0440\u0435\u043C\u044F \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F");
+  return null;
+}
+function formatIndexStatus(indexed, total, indexStatus) {
+  if (total > indexed) {
+    return `Indexed ${indexed}/${total} files (${indexStatus})`;
+  }
+  return `Indexed ${indexed} files (${indexStatus})`;
+}
+
+// src/settings.ts
+var import_obsidian4 = require("obsidian");
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
   pythonCommand: "obsidian-context-mcp",
   sidecarArgs: "",
-  autoStart: true
+  autoStart: true,
+  stopServerOnQuit: false
 };
 
 // src/settings.ts
-var ObsidianContextSettingTab = class extends import_obsidian3.PluginSettingTab {
+var ObsidianContextSettingTab = class extends import_obsidian4.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -372,35 +504,43 @@ var ObsidianContextSettingTab = class extends import_obsidian3.PluginSettingTab 
     const pluginDir = resolvePluginDir(this.app, this.plugin.manifest);
     const bundled = hasBundledSidecar(pluginDir);
     const serverPath = activeSidecarPath(pluginDir, this.plugin.settings.pythonCommand);
-    new import_obsidian3.Setting(containerEl).setName("Program folder").setDesc(pluginDir);
-    new import_obsidian3.Setting(containerEl).setName("Vault server").setDesc(
+    new import_obsidian4.Setting(containerEl).setName("Program folder").setDesc(pluginDir);
+    new import_obsidian4.Setting(containerEl).setName("Vault server").setDesc(
       bundled ? `\u0412\u0441\u0442\u0440\u043E\u0435\u043D \u0432 \u043F\u043B\u0430\u0433\u0438\u043D: ${serverPath}` : "\u0421\u0435\u0440\u0432\u0435\u0440 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0432 plugin/. \u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 scripts/install-obsidian-plugin.sh"
     );
     if (!bundled) {
-      new import_obsidian3.Setting(containerEl).setName("Python command (dev fallback)").setDesc("\u0422\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u043A\u0438, \u0435\u0441\u043B\u0438 server/.venv \u043D\u0435 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D").addText(
+      new import_obsidian4.Setting(containerEl).setName("Python command (dev fallback)").setDesc("\u0422\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u043A\u0438, \u0435\u0441\u043B\u0438 server/.venv \u043D\u0435 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D").addText(
         (text) => text.setPlaceholder("obsidian-context-mcp").setValue(this.plugin.settings.pythonCommand).onChange(async (v) => {
           this.plugin.settings.pythonCommand = v.trim() || DEFAULT_SETTINGS.pythonCommand;
           await this.plugin.saveSettings();
         })
       );
     }
-    new import_obsidian3.Setting(containerEl).setName("Auto-start sidecar").setDesc("Start vault-server when Obsidian loads the vault").addToggle(
+    new import_obsidian4.Setting(containerEl).setName("Auto-start sidecar").setDesc("Start vault-server when Obsidian loads the vault").addToggle(
       (t) => t.setValue(this.plugin.settings.autoStart).onChange(async (v) => {
         this.plugin.settings.autoStart = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Index status").setDesc(this.plugin.statusText).addButton((btn) => {
+    new import_obsidian4.Setting(containerEl).setName("Stop server on quit").setDesc(
+      "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C vault-server \u043F\u0440\u0438 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u0438 Obsidian. \u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u0434\u043B\u044F Cursor MCP \u0432 \u0444\u043E\u043D\u0435."
+    ).addToggle(
+      (t) => t.setValue(this.plugin.settings.stopServerOnQuit).onChange(async (v) => {
+        this.plugin.settings.stopServerOnQuit = v;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian4.Setting(containerEl).setName("Index status").setDesc(this.plugin.statusText).addButton((btn) => {
       btn.setButtonText("Reindex").onClick(() => {
         void this.runAction(btn, "Reindex", () => this.plugin.reindexVault());
       });
     });
-    new import_obsidian3.Setting(containerEl).setName("Restart server").setDesc("\u041F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C vault-server").addButton((btn) => {
+    new import_obsidian4.Setting(containerEl).setName("Restart server").setDesc("\u041F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C vault-server").addButton((btn) => {
       btn.setButtonText("Restart").onClick(() => {
         void this.runAction(btn, "Restart", () => this.plugin.restartSidecarIfNeeded());
       });
     });
-    new import_obsidian3.Setting(containerEl).setName("Access scopes").setDesc("Manage Cursor access to specific vault folders").addButton((btn) => {
+    new import_obsidian4.Setting(containerEl).setName("Access scopes").setDesc("Manage Cursor access to specific vault folders").addButton((btn) => {
       btn.setButtonText("Open scopes").onClick(() => {
         void this.runAction(btn, "Open scopes", () => this.plugin.openScopesModal());
       });
@@ -413,7 +553,7 @@ var ObsidianContextSettingTab = class extends import_obsidian3.PluginSettingTab 
       await action();
       this.display();
     } catch (e) {
-      new import_obsidian3.Notice(String(e));
+      new import_obsidian4.Notice(String(e));
       this.display();
     } finally {
       btn.setDisabled(false);
@@ -423,37 +563,307 @@ var ObsidianContextSettingTab = class extends import_obsidian3.PluginSettingTab 
 };
 
 // src/views/ScopesModal.ts
-var import_obsidian4 = require("obsidian");
-var ScopesModal = class extends import_obsidian4.Modal {
+var import_obsidian5 = require("obsidian");
+
+// src/folderScope.ts
+var ALL_VAULT_PATH = "*";
+var SKIP_PREFIXES = [".obsidian", ".trash", ".git"];
+function listVaultFolderNodes(app) {
+  const nodes = [
+    { path: ALL_VAULT_PATH, name: "\u0412\u0435\u0441\u044C vault", depth: 0 },
+    { path: "", name: "\u0424\u0430\u0439\u043B\u044B \u0432 \u043A\u043E\u0440\u043D\u0435 (\u0431\u0435\u0437 \u043F\u0430\u043F\u043A\u0438)", depth: 1 }
+  ];
+  const folders = app.vault.getAllFolders(true).sort((a, b) => a.path.localeCompare(b.path));
+  for (const folder of folders) {
+    const p = folder.path.replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!p || p === "/") continue;
+    if (SKIP_PREFIXES.some((skip) => p === skip || p.startsWith(`${skip}/`))) continue;
+    nodes.push({
+      path: p,
+      name: folder.name,
+      depth: p.split("/").length + 1
+    });
+  }
+  return nodes;
+}
+function cascadeTargets(nodes, path3) {
+  if (path3 === ALL_VAULT_PATH) {
+    return nodes.map((n) => n.path);
+  }
+  if (!path3) {
+    return [""];
+  }
+  const prefix = `${path3}/`;
+  return nodes.filter((n) => n.path === path3 || n.path.startsWith(prefix)).map((n) => n.path);
+}
+function folderToIncludeGlob(path3) {
+  if (path3 === ALL_VAULT_PATH) return "**/*.md";
+  return path3 ? `${path3}/**` : "*.md";
+}
+function globToFolderPath(pattern) {
+  const p = pattern.trim().replace(/\\/g, "/");
+  if (p === "**/*.md" || p === "**/**") return ALL_VAULT_PATH;
+  if (p === "*.md") return "";
+  if (p.endsWith("/**")) return p.slice(0, -3);
+  if (p.endsWith("/**/*.md")) return p.slice(0, -"/**/*.md".length);
+  return null;
+}
+function isFullVaultGlob(patterns) {
+  return patterns.some((p) => p === "**/*.md" || p === "**/**");
+}
+function selectionsFromScope(nodes, include, writeInclude, writeAccess) {
+  const map = /* @__PURE__ */ new Map();
+  for (const n of nodes) {
+    map.set(n.path, { read: false, write: false });
+  }
+  if (isFullVaultGlob(include)) {
+    for (const n of nodes) {
+      map.set(n.path, { read: true, write: false });
+    }
+  } else {
+    for (const pattern of include) {
+      const folder = globToFolderPath(pattern);
+      if (folder === null || !map.has(folder)) continue;
+      for (const target of cascadeTargets(nodes, folder)) {
+        const cur = map.get(target);
+        map.set(target, { read: true, write: cur.write });
+      }
+    }
+  }
+  const writePatterns = writeInclude?.length ? writeInclude : writeAccess ? include : [];
+  if (isFullVaultGlob(writePatterns)) {
+    for (const n of nodes) {
+      map.set(n.path, { read: true, write: true });
+    }
+  } else {
+    for (const pattern of writePatterns) {
+      const folder = globToFolderPath(pattern);
+      if (folder === null || !map.has(folder)) continue;
+      for (const target of cascadeTargets(nodes, folder)) {
+        map.set(target, { read: true, write: true });
+      }
+    }
+  }
+  syncMasterRow(nodes, map);
+  return map;
+}
+function syncMasterRow(nodes, map) {
+  const rest = nodes.filter((n) => n.path !== ALL_VAULT_PATH);
+  map.set(ALL_VAULT_PATH, {
+    read: rest.every((n) => map.get(n.path)?.read),
+    write: rest.every((n) => map.get(n.path)?.write)
+  });
+}
+function scopeFromSelections(nodes, selections) {
+  const rest = nodes.filter((n) => n.path !== ALL_VAULT_PATH);
+  const allRead = rest.every((n) => selections.get(n.path)?.read);
+  const allWrite = rest.every((n) => selections.get(n.path)?.write);
+  if (allRead) {
+    return {
+      include: ["**/*.md"],
+      writeInclude: allWrite ? ["**/*.md"] : compactWriteGlobs(nodes, selections),
+      writeAccess: allWrite || compactWriteGlobs(nodes, selections).length > 0
+    };
+  }
+  const include = [];
+  const writeInclude = [];
+  for (const node of rest) {
+    const access = selections.get(node.path);
+    if (!access?.read) continue;
+    if (!isCoveredByAncestor(node.path, rest, selections, "read")) {
+      const glob = folderToIncludeGlob(node.path);
+      if (glob) include.push(glob);
+    }
+    if (access.write && !isCoveredByAncestor(node.path, rest, selections, "write")) {
+      const glob = folderToIncludeGlob(node.path);
+      if (glob && glob !== "**/*.md") writeInclude.push(glob);
+      else if (glob === "*.md") writeInclude.push("*.md");
+    }
+  }
+  return {
+    include,
+    writeInclude,
+    writeAccess: writeInclude.length > 0
+  };
+}
+function isCoveredByAncestor(path3, nodes, selections, field) {
+  if (!path3) return false;
+  const parts = path3.split("/");
+  for (let i = 1; i < parts.length; i++) {
+    const ancestor = parts.slice(0, i).join("/");
+    if (nodes.some((n) => n.path === ancestor) && selections.get(ancestor)?.[field]) {
+      return true;
+    }
+  }
+  return false;
+}
+function compactWriteGlobs(nodes, selections) {
+  const rest = nodes.filter((n) => n.path !== ALL_VAULT_PATH);
+  const out = [];
+  for (const node of rest) {
+    const access = selections.get(node.path);
+    if (!access?.write) continue;
+    if (!isCoveredByAncestor(node.path, rest, selections, "write")) {
+      const glob = folderToIncludeGlob(node.path);
+      if (glob && glob !== "**/*.md") out.push(glob);
+    }
+  }
+  return out;
+}
+
+// src/views/FolderScopePicker.ts
+var FolderScopePicker = class {
+  constructor(container, nodes, include, writeInclude, writeAccess) {
+    this.container = container;
+    this.nodes = nodes;
+    this.selections = /* @__PURE__ */ new Map();
+    this.bodyEl = null;
+    this.checkboxByPath = /* @__PURE__ */ new Map();
+    this.selections = selectionsFromScope(nodes, include, writeInclude, writeAccess);
+    this.render();
+  }
+  onChange(handler) {
+    this.onChangeHandler = handler;
+  }
+  getScopeFields() {
+    return scopeFromSelections(this.nodes, this.selections);
+  }
+  getWriteFolderCount() {
+    let n = 0;
+    for (const [path3, access] of this.selections) {
+      if (path3 !== ALL_VAULT_PATH && access.write) n++;
+    }
+    return n;
+  }
+  getAccess(path3) {
+    return this.selections.get(path3) ?? { read: false, write: false };
+  }
+  setCascade(path3, field, value) {
+    const targets = cascadeTargets(this.nodes, path3);
+    for (const target of targets) {
+      const cur = this.getAccess(target);
+      if (field === "read") {
+        this.selections.set(target, {
+          read: value,
+          write: value ? cur.write : false
+        });
+      } else {
+        this.selections.set(target, {
+          read: value ? true : cur.read,
+          write: value
+        });
+      }
+    }
+    syncMasterRow(this.nodes, this.selections);
+    this.syncCheckboxes();
+    this.onChangeHandler?.();
+  }
+  syncCheckboxes() {
+    for (const node of this.nodes) {
+      const refs = this.checkboxByPath.get(node.path);
+      if (!refs) continue;
+      const access = this.getAccess(node.path);
+      refs.read.checked = access.read;
+      refs.write.checked = access.write;
+      refs.write.disabled = !access.read;
+    }
+  }
+  render() {
+    this.container.empty();
+    this.checkboxByPath.clear();
+    this.container.createEl("p", {
+      cls: "ocm-muted",
+      text: "\u0413\u0430\u043B\u043E\u0447\u043A\u0430 \u043D\u0430 \u043F\u0430\u043F\u043A\u0435 \u0432\u043A\u043B\u044E\u0447\u0430\u0435\u0442 \u0432\u0441\u0435 \u043F\u043E\u0434\u043F\u0430\u043F\u043A\u0438. \xAB\u0412\u0435\u0441\u044C vault\xBB \u2014 \u0432\u0441\u0435 \u0441\u0440\u0430\u0437\u0443."
+    });
+    const header = this.container.createDiv({ cls: "ocm-folder-picker-header" });
+    header.createSpan({ text: "\u041F\u0430\u043F\u043A\u0430" });
+    header.createSpan({ text: "\u0427\u0438\u0442\u0430\u0442\u044C", cls: "ocm-folder-picker-col" });
+    header.createSpan({ text: "\u041F\u0438\u0441\u0430\u0442\u044C", cls: "ocm-folder-picker-col" });
+    this.bodyEl = this.container.createDiv({ cls: "ocm-folder-picker-body" });
+    for (const node of this.nodes) {
+      const access = this.getAccess(node.path);
+      const row = this.bodyEl.createDiv({ cls: "ocm-folder-picker-row" });
+      if (node.path === ALL_VAULT_PATH) {
+        row.addClass("ocm-folder-picker-master");
+      }
+      row.style.paddingLeft = `${8 + node.depth * 18}px`;
+      const label = row.createDiv({ cls: "ocm-folder-picker-label" });
+      label.createSpan({ text: node.name });
+      if (node.path && node.path !== ALL_VAULT_PATH) {
+        label.createEl("span", { cls: "ocm-muted", text: ` ${node.path}` });
+      }
+      const readCb = row.createEl("input", { type: "checkbox" });
+      readCb.className = "ocm-folder-picker-col";
+      readCb.checked = access.read;
+      const writeCb = row.createEl("input", { type: "checkbox" });
+      writeCb.className = "ocm-folder-picker-col";
+      writeCb.checked = access.write;
+      writeCb.disabled = !access.read;
+      readCb.onchange = () => {
+        this.setCascade(node.path, "read", readCb.checked);
+      };
+      writeCb.onchange = () => {
+        this.setCascade(node.path, "write", writeCb.checked);
+      };
+      this.checkboxByPath.set(node.path, { read: readCb, write: writeCb });
+    }
+  }
+};
+
+// src/views/ScopesModal.ts
+var ScopesModal = class extends import_obsidian5.Modal {
   constructor(app, client) {
     super(app);
     this.client = client;
     this.scopes = [];
+    this.folderNodes = listVaultFolderNodes(this.app);
+    this.markdownPaths = [];
   }
   async onOpen() {
-    const { contentEl } = this;
-    contentEl.createEl("h2", { text: "Access Scopes for Cursor" });
+    const { contentEl, modalEl } = this;
+    modalEl.addClass("ocm-scopes-modal");
+    modalEl.style.setProperty("--modal-width", "920px");
+    modalEl.style.width = "min(920px, 94vw)";
+    contentEl.addClass("ocm-scopes-modal-content");
+    contentEl.createEl("h2", { text: "\u0414\u043E\u0441\u0442\u0443\u043F Cursor \u043A vault" });
     contentEl.createEl("p", {
-      text: "Each scope limits which folders Cursor can read via MCP. Copy the config snippet into Cursor settings."
+      text: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u0434\u043B\u044F \u0447\u0442\u0435\u043D\u0438\u044F \u0438 \u0437\u0430\u043F\u0438\u0441\u0438. \u0421\u043A\u043E\u043F\u0438\u0440\u0443\u0439\u0442\u0435 JSON \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 MCP Cursor."
     });
-    await this.reload();
-    new import_obsidian4.Setting(contentEl).setName("New scope").addButton(
-      (btn) => btn.setButtonText("Add scope").setCta().onClick(async () => {
-        const id = `scope-${Date.now()}`;
-        await this.client.upsertScope({
-          id,
-          name: "New scope",
-          include: ["**/*.md"],
-          exclude: [],
-          writeAccess: false,
-          canReindex: false,
-          token: ""
-        });
-        await this.reload();
+    this.markdownPaths = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
+    this.listEl = contentEl.createDiv({ cls: "ocm-scopes-list" });
+    new import_obsidian5.Setting(contentEl).setName("\u041D\u043E\u0432\u044B\u0439 scope").setDesc("\u041E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u0439 \u0442\u043E\u043A\u0435\u043D \u0434\u043B\u044F Cursor \u0441 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u043C\u0438 \u043F\u0430\u043F\u043A\u0430\u043C\u0438").addButton(
+      (btn) => btn.setButtonText("\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope").setCta().onClick(() => {
+        void this.addScope(btn);
       })
     );
-    this.listEl = contentEl.createDiv();
+    await this.reload();
     this.renderList();
+  }
+  async addScope(btn) {
+    const label = "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope";
+    btn.setDisabled(true);
+    btn.setButtonText("\u2026");
+    try {
+      const id = `scope-${Date.now()}`;
+      await this.client.upsertScope({
+        id,
+        name: "\u041D\u043E\u0432\u044B\u0439 scope",
+        include: [],
+        exclude: [],
+        writeAccess: false,
+        writeInclude: [],
+        canReindex: false,
+        token: ""
+      });
+      await this.reload();
+      this.renderList();
+      new import_obsidian5.Notice("Scope \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D \u2014 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438");
+    } catch (e) {
+      new import_obsidian5.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope: ${e}`);
+    } finally {
+      btn.setDisabled(false);
+      btn.setButtonText(label);
+    }
   }
   async reload() {
     const res = await this.client.listScopes();
@@ -461,47 +871,107 @@ var ScopesModal = class extends import_obsidian4.Modal {
   }
   renderList() {
     this.listEl.empty();
-    for (const scope of this.scopes) {
-      const block = this.listEl.createDiv({ cls: "ocm-scope-block" });
-      block.createEl("h3", { text: scope.name });
-      new import_obsidian4.Setting(block).setName("Scope ID").setDesc(scope.id).addText((t) => t.setValue(scope.id).setDisabled(true));
-      new import_obsidian4.Setting(block).setName("Include globs").addTextArea(
-        (ta) => ta.setValue(scope.include.join("\n")).onChange(async (v) => {
-          scope.include = v.split("\n").map((s) => s.trim()).filter(Boolean);
-          await this.client.upsertScope(scope);
-        })
-      );
-      new import_obsidian4.Setting(block).setName("Write access").addToggle(
-        (t) => t.setValue(scope.writeAccess).onChange(async (v) => {
-          scope.writeAccess = v;
-          await this.client.upsertScope(scope);
-        })
-      );
-      new import_obsidian4.Setting(block).setName("Cursor MCP config").addButton(
-        (btn) => btn.setButtonText("Copy JSON").onClick(async () => {
-          try {
-            const res = await this.client.cursorConfig(scope.id);
-            await navigator.clipboard.writeText(JSON.stringify(res.config, null, 2));
-            new import_obsidian4.Notice("Cursor MCP config copied");
-          } catch (e) {
-            new import_obsidian4.Notice(`Copy failed: ${e}`);
-          }
-        })
-      ).addButton(
-        (btn) => btn.setButtonText("Regenerate token").onClick(async () => {
-          await this.client.regenerateToken(scope.id);
-          await this.reload();
-          this.renderList();
-          new import_obsidian4.Notice("Token regenerated \u2014 update Cursor config");
-        })
-      ).addButton(
-        (btn) => btn.setButtonText("Delete").setWarning().onClick(async () => {
-          await this.client.deleteScope(scope.id);
-          await this.reload();
-          this.renderList();
-        })
-      );
+    if (!this.scopes.length) {
+      this.listEl.createEl("p", {
+        cls: "ocm-muted",
+        text: "\u041D\u0435\u0442 scopes. \u041D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope\xBB."
+      });
+      return;
     }
+    for (const scope of this.scopes) {
+      this.renderScopeBlock(scope);
+    }
+  }
+  renderScopeBlock(scope) {
+    const block = this.listEl.createDiv({ cls: "ocm-scope-block" });
+    new import_obsidian5.Setting(block).setName("\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435").addText(
+      (t) => t.setValue(scope.name).onChange(async (v) => {
+        scope.name = v.trim() || scope.name;
+        await this.saveScope(scope);
+      })
+    );
+    const pickerHost = block.createDiv({ cls: "ocm-folder-picker" });
+    const previewEl = block.createEl("p", { cls: "ocm-muted" });
+    const updatePreview = () => {
+      const fields = picker.getScopeFields();
+      const count = this.countFilesForInclude(fields.include);
+      const writeFolders = picker.getWriteFolderCount();
+      previewEl.setText(
+        fields.include.length ? `Cursor \u0443\u0432\u0438\u0434\u0438\u0442 ~${count} \u0437\u0430\u043C\u0435\u0442\u043E\u043A` + (fields.writeAccess ? `, \u0437\u0430\u043F\u0438\u0441\u044C \u0432 ${writeFolders} ${writeFolders === 1 ? "\u043F\u0430\u043F\u043A\u0435" : "\u043F\u0430\u043F\u043A\u0430\u0445"}` : ", \u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435") : "\u041D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D\u043E \u043D\u0438 \u043E\u0434\u043D\u043E\u0439 \u043F\u0430\u043F\u043A\u0438 \u2014 Cursor \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0443\u0432\u0438\u0434\u0438\u0442"
+      );
+    };
+    const picker = new FolderScopePicker(
+      pickerHost,
+      this.folderNodes,
+      scope.include,
+      scope.writeInclude,
+      scope.writeAccess
+    );
+    let saveTimer = null;
+    picker.onChange(() => {
+      updatePreview();
+      if (saveTimer !== null) window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(() => {
+        void this.applyPicker(scope, picker).catch((e) => new import_obsidian5.Notice(String(e)));
+      }, 400);
+    });
+    updatePreview();
+    new import_obsidian5.Setting(block).setName("Scope ID").setDesc(scope.id).addText((t) => t.setValue(scope.id).setDisabled(true));
+    new import_obsidian5.Setting(block).setName("Cursor MCP").addButton(
+      (btn) => btn.setButtonText("Copy JSON").onClick(async () => {
+        try {
+          const res = await this.client.cursorConfig(scope.id);
+          await navigator.clipboard.writeText(JSON.stringify(res.config, null, 2));
+          new import_obsidian5.Notice("\u041A\u043E\u043D\u0444\u0438\u0433 Cursor \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D");
+        } catch (e) {
+          new import_obsidian5.Notice(`Copy failed: ${e}`);
+        }
+      })
+    ).addButton(
+      (btn) => btn.setButtonText("Regenerate token").onClick(async () => {
+        await this.client.regenerateToken(scope.id);
+        await this.reload();
+        this.renderList();
+        new import_obsidian5.Notice("\u0422\u043E\u043A\u0435\u043D \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D \u2014 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433 \u0432 Cursor");
+      })
+    ).addButton(
+      (btn) => btn.setButtonText("Delete").setWarning().onClick(async () => {
+        await this.client.deleteScope(scope.id);
+        await this.reload();
+        this.renderList();
+      })
+    );
+  }
+  countFilesForInclude(include) {
+    if (!include.length) return 0;
+    if (include.includes("**/*.md")) return this.markdownPaths.length;
+    let count = 0;
+    for (const file of this.markdownPaths) {
+      if (include.some((p) => this.fileMatchesGlob(file, p))) count++;
+    }
+    return count;
+  }
+  fileMatchesGlob(file, pattern) {
+    if (pattern === "*.md") return !file.includes("/");
+    if (pattern.endsWith("/**")) {
+      const prefix = pattern.slice(0, -3);
+      return file === prefix || file.startsWith(`${prefix}/`);
+    }
+    if (pattern.endsWith("/**/*.md")) {
+      const prefix = pattern.slice(0, -"/**/*.md".length);
+      return file.startsWith(`${prefix}/`) || file === prefix;
+    }
+    return false;
+  }
+  async applyPicker(scope, picker) {
+    const fields = picker.getScopeFields();
+    scope.include = fields.include;
+    scope.writeInclude = fields.writeInclude;
+    scope.writeAccess = fields.writeAccess;
+    await this.saveScope(scope);
+  }
+  async saveScope(scope) {
+    await this.client.upsertScope(scope);
   }
   onClose() {
     this.contentEl.empty();
@@ -509,8 +979,8 @@ var ScopesModal = class extends import_obsidian4.Modal {
 };
 
 // src/views/SearchModal.ts
-var import_obsidian5 = require("obsidian");
-var SearchModal = class extends import_obsidian5.Modal {
+var import_obsidian6 = require("obsidian");
+var SearchModal = class extends import_obsidian6.Modal {
   constructor(app, client) {
     super(app);
     this.client = client;
@@ -520,7 +990,7 @@ var SearchModal = class extends import_obsidian5.Modal {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Semantic search" });
     let query = "";
-    new import_obsidian5.Setting(contentEl).setName("Query").addText(
+    new import_obsidian6.Setting(contentEl).setName("Query").addText(
       (text) => text.setPlaceholder("Search vault...").onChange((v) => {
         query = v;
       })
@@ -531,7 +1001,7 @@ var SearchModal = class extends import_obsidian5.Modal {
           this.results = res.results;
           this.renderResults();
         } catch (e) {
-          new import_obsidian5.Notice(`Search failed: ${e}`);
+          new import_obsidian6.Notice(`Search failed: ${e}`);
         }
       })
     );
@@ -560,25 +1030,28 @@ var SearchModal = class extends import_obsidian5.Modal {
 };
 
 // src/main.ts
-var ObsidianContextPlugin = class extends import_obsidian6.Plugin {
+var ObsidianContextPlugin = class extends import_obsidian7.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
     this.sidecar = null;
     this.client = null;
     this.runtime = null;
+    this.startPromise = null;
+    this.settingTab = null;
     this.statusText = "Not started";
   }
   async onload() {
     try {
       await this.loadSettings();
-      this.addSettingTab(new ObsidianContextSettingTab(this.app, this));
+      this.settingTab = new ObsidianContextSettingTab(this.app, this);
+      this.addSettingTab(this.settingTab);
       const pluginDir = resolvePluginDir(this.app, this.manifest);
       const dataDir = resolvePluginDataDir(this.app, this.manifest);
       const vaultPath = this.getVaultPath();
       if (!vaultPath) {
         this.statusText = "\u041D\u0443\u0436\u0435\u043D \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault (\u043D\u0435 \u043E\u0431\u043B\u0430\u0447\u043D\u044B\u0439 \u0431\u0435\u0437 basePath)";
-        new import_obsidian6.Notice("Obsidian Context MCP: \u043E\u0442\u043A\u0440\u043E\u0439 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault \u0438\u043B\u0438 \u0443\u043A\u0430\u0436\u0438 Python command \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445.");
+        new import_obsidian7.Notice("Obsidian Context MCP: \u043E\u0442\u043A\u0440\u043E\u0439 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 vault \u0438\u043B\u0438 \u0443\u043A\u0430\u0436\u0438 Python command \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445.");
         return;
       }
       this.sidecar = new SidecarManager(
@@ -607,20 +1080,34 @@ var ObsidianContextPlugin = class extends import_obsidian6.Plugin {
         name: "Restart vault-server",
         callback: () => void this.restartSidecarIfNeeded()
       });
+      this.addRibbonIcon("scan-search", "\u0421\u0435\u043C\u0430\u043D\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u043F\u043E\u0438\u0441\u043A vault", () => {
+        void this.openSearchModal();
+      });
       const statusItem = this.addStatusBarItem();
       statusItem.setText("OCM");
-      (0, import_obsidian6.setTooltip)(statusItem, this.statusText);
+      (0, import_obsidian7.setTooltip)(statusItem, this.statusText);
       statusItem.onClickEvent(() => void this.openSearchModal());
       if (this.settings.autoStart) {
         window.setTimeout(() => {
-          void this.startSidecar().catch((e) => new import_obsidian6.Notice(String(e)));
+          void this.startSidecar().catch((e) => new import_obsidian7.Notice(String(e)));
         }, 500);
       }
     } catch (e) {
       console.error("[obsidian-context-mcp] onload failed:", e);
       this.statusText = `Plugin error: ${e}`;
-      new import_obsidian6.Notice(`Obsidian Context MCP: \u043E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u2014 ${e}`);
+      new import_obsidian7.Notice(`Obsidian Context MCP: \u043E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u2014 ${e}`);
     }
+  }
+  refreshSettingsDisplay() {
+    this.settingTab?.display();
+  }
+  applyVaultStatus(status) {
+    this.statusText = formatIndexStatus(
+      status.fileCount,
+      status.vaultFileCount ?? status.fileCount,
+      status.indexStatus
+    );
+    this.refreshSettingsDisplay();
   }
   getVaultPath() {
     const adapter = this.app.vault.adapter;
@@ -652,16 +1139,19 @@ var ObsidianContextPlugin = class extends import_obsidian6.Plugin {
     this.client = null;
     this.runtime = null;
     await this.startSidecar();
-    new import_obsidian6.Notice("vault-server \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0449\u0435\u043D");
+    new import_obsidian7.Notice("vault-server \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0449\u0435\u043D");
   }
   async onunload() {
-    try {
-      await this.sidecar?.stop();
-    } catch (e) {
-      console.error("[obsidian-context-mcp] onunload:", e);
+    if (this.settings.stopServerOnQuit) {
+      try {
+        await this.sidecar?.forceStopForRestart();
+      } catch (e) {
+        console.error("[obsidian-context-mcp] stop on quit:", e);
+      }
     }
     this.client = null;
     this.runtime = null;
+    this.startPromise = null;
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -670,12 +1160,19 @@ var ObsidianContextPlugin = class extends import_obsidian6.Plugin {
     await this.saveData(this.settings);
   }
   async startSidecar() {
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.startSidecarOnce().finally(() => {
+      this.startPromise = null;
+    });
+    return this.startPromise;
+  }
+  async startSidecarOnce() {
     try {
       const sidecar = this.ensureSidecar();
       this.runtime = await sidecar.start();
       this.client = SidecarClient.fromRuntime(this.runtime);
       const status = await this.client.status();
-      this.statusText = `Indexed ${status.fileCount} files (${status.indexStatus})`;
+      this.applyVaultStatus(status);
     } catch (e) {
       console.error("[obsidian-context-mcp] startSidecar:", e);
       this.statusText = `Error: ${e}`;
@@ -695,7 +1192,7 @@ var ObsidianContextPlugin = class extends import_obsidian6.Plugin {
       if (!this.client) await this.startSidecar();
       new SearchModal(this.app, this.ensureClient()).open();
     } catch (e) {
-      new import_obsidian6.Notice(String(e));
+      new import_obsidian7.Notice(String(e));
       throw e;
     }
   }
@@ -704,19 +1201,20 @@ var ObsidianContextPlugin = class extends import_obsidian6.Plugin {
       if (!this.client) await this.startSidecar();
       new ScopesModal(this.app, this.ensureClient()).open();
     } catch (e) {
-      new import_obsidian6.Notice(String(e));
+      new import_obsidian7.Notice(String(e));
       throw e;
     }
   }
   async reindexVault() {
     try {
       if (!this.client) await this.startSidecar();
-      await this.ensureClient().reindex("incremental");
-      const status = await this.client.status();
-      this.statusText = `Indexed ${status.fileCount} files (${status.indexStatus})`;
-      new import_obsidian6.Notice("Reindex started");
+      const client = this.ensureClient();
+      await client.reindex("incremental");
+      await watchReindexProgress(() => client.indexJobStatus());
+      const status = await client.status();
+      this.applyVaultStatus(status);
     } catch (e) {
-      new import_obsidian6.Notice(String(e));
+      new import_obsidian7.Notice(String(e));
       throw e;
     }
   }

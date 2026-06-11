@@ -73,7 +73,6 @@ def run_vault_server(
         raise SystemExit(1) from None
 
     chosen_port = port if port > 0 else _pick_free_port(host)
-    _write_runtime(resolved_data, port=chosen_port, host=host, vault_id=ctx.vault_id)
 
     def _shutdown(*_args: object) -> None:
         _clear_runtime(resolved_data)
@@ -96,8 +95,11 @@ def run_vault_server(
 
     threading.Thread(target=_initial_index, daemon=True).start()
 
-    app = create_http_app(ctx)
-    logger.info("Vault server listening on http://{}:{}", host, chosen_port)
+    def _on_startup() -> None:
+        _write_runtime(resolved_data, port=chosen_port, host=host, vault_id=ctx.vault_id)
+        logger.info("Vault server listening on http://{}:{}", host, chosen_port)
+
+    app = create_http_app(ctx, on_startup=_on_startup)
     try:
         uvicorn.run(app, host=host, port=chosen_port, log_level="info")
     finally:

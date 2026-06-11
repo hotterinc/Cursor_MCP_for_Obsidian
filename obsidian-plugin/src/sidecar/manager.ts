@@ -29,9 +29,36 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+function unlinkIfExists(filePath: string): void {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function logVaultServerLine(text: string, stream: "stdout" | "stderr"): void {
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const isError =
+      stream === "stderr" &&
+      /\b(ERROR|Error:|Traceback|Exception|failed)\b/.test(trimmed) &&
+      !/^INFO:/.test(trimmed);
+    if (isError) {
+      console.error("[vault-server]", trimmed);
+    } else {
+      console.log("[vault-server]", trimmed);
+    }
+  }
+}
+
 export class SidecarManager {
   private process: ChildProcessWithoutNullStreams | null = null;
   private ownsProcess = false;
+  private startPromise: Promise<VaultRuntimeInfo> | null = null;
   private dataDir: string;
   private vaultPath: string;
   private pluginDir: string;
@@ -58,46 +85,97 @@ export class SidecarManager {
     return path.join(this.dataDir, "locks", "vault-server.lock");
   }
 
-  /** Stop our process and any orphaned vault-server for this vault (user-initiated restart). */
+  private readLockPid(): number | null {
+    if (!fs.existsSync(this.lockPath)) return null;
+    try {
+      const pid = Number.parseInt(fs.readFileSync(this.lockPath, "utf-8").trim(), 10);
+      return Number.isFinite(pid) && pid > 0 ? pid : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private collectServerPids(): number[] {
+    const pids = new Set<number>();
+    const lockPid = this.readLockPid();
+    if (lockPid) pids.add(lockPid);
+    const runtime = this.readRuntime();
+    if (runtime?.pid) pids.add(runtime.pid);
+    if (this.process?.pid) pids.add(this.process.pid);
+    return [...pids];
+  }
+
+  private async terminatePid(pid: number, timeoutMs = 5000): Promise<void> {
+    if (!isPidAlive(pid)) return;
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      return;
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!isPidAlive(pid)) return;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* ignore */
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  /** Stop every vault-server instance tied to this vault data dir. */
+  async clearServerState(): Promise<void> {
+    for (const pid of this.collectServerPids()) {
+      await this.terminatePid(pid);
+    }
+    this.process = null;
+    this.ownsProcess = false;
+    unlinkIfExists(this.lockPath);
+    unlinkIfExists(this.runtimePath);
+  }
+
   async forceStopForRestart(): Promise<void> {
-    await this.stop();
-
-    if (fs.existsSync(this.lockPath)) {
-      try {
-        const pid = Number.parseInt(fs.readFileSync(this.lockPath, "utf-8").trim(), 10);
-        if (isPidAlive(pid)) {
-          process.kill(pid, "SIGTERM");
-          await new Promise((r) => setTimeout(r, 750));
-        }
-      } catch {
-        /* ignore */
-      }
-      try {
-        fs.unlinkSync(this.lockPath);
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (fs.existsSync(this.runtimePath)) {
-      try {
-        fs.unlinkSync(this.runtimePath);
-      } catch {
-        /* ignore */
-      }
-    }
+    this.startPromise = null;
+    await this.clearServerState();
   }
 
   private async isHealthy(runtime: VaultRuntimeInfo): Promise<boolean> {
     return healthCheck(`http://${runtime.host}:${runtime.port}/health`, 2000);
   }
 
-  async start(): Promise<VaultRuntimeInfo> {
+  private async prepareForStart(): Promise<VaultRuntimeInfo | null> {
     const existing = this.readRuntime();
     if (existing && (await this.isHealthy(existing))) {
       this.ownsProcess = false;
       return existing;
     }
+
+    const lockPid = this.readLockPid();
+    if (lockPid && isPidAlive(lockPid)) {
+      // Lock held but runtime missing or unhealthy — orphan from crashed plugin session.
+      await this.clearServerState();
+    } else {
+      unlinkIfExists(this.lockPath);
+      if (!existing) {
+        unlinkIfExists(this.runtimePath);
+      }
+    }
+    return null;
+  }
+
+  async start(): Promise<VaultRuntimeInfo> {
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.startOnce().finally(() => {
+      this.startPromise = null;
+    });
+    return this.startPromise;
+  }
+
+  private async startOnce(): Promise<VaultRuntimeInfo> {
+    const attached = await this.prepareForStart();
+    if (attached) return attached;
 
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -123,8 +201,12 @@ export class SidecarManager {
             "--port",
             "0",
           ],
-          { stdio: ["ignore", "pipe", "pipe"] }
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            detached: true,
+          }
         );
+        this.process.unref();
       } catch (err) {
         fail(err instanceof Error ? err : new Error(String(err)));
         return;
@@ -139,34 +221,35 @@ export class SidecarManager {
         fail(new Error(`Не удалось запустить vault-server (${command}): ${err.message}`));
       });
 
-      this.process.stdout?.on("data", (d) => console.log("[vault-server]", d.toString()));
-      this.process.stderr?.on("data", (d) => console.error("[vault-server]", d.toString()));
+      this.process.stdout?.on("data", (d) => logVaultServerLine(d.toString(), "stdout"));
+      this.process.stderr?.on("data", (d) => logVaultServerLine(d.toString(), "stderr"));
       this.process.on("exit", (code) => {
-        console.error(`[vault-server] exited with code ${code}`);
         this.process = null;
         this.ownsProcess = false;
-        if (fs.existsSync(this.runtimePath)) {
-          try {
-            fs.unlinkSync(this.runtimePath);
-          } catch {
-            /* ignore */
-          }
-        }
         if (!settled) {
+          console.error(`[vault-server] exited with code ${code}`);
           fail(
             new Error(
               code === 1
-                ? "vault-server уже запущен или lock занят. Нажмите Restart server."
+                ? "vault-server не смог захватить lock. Нажмите Restart server ещё раз."
                 : `vault-server завершился с кодом ${code}. См. data/logs/vault-server.log`
             )
           );
+        } else if (code !== 0) {
+          console.warn(`[vault-server] exited with code ${code}`);
         }
       });
 
-      this.waitForRuntime(30000)
+      this.waitForHealthyRuntime(30000)
         .then((runtime) => {
           if (settled) return;
           settled = true;
+          // Detached server logs to data/logs/vault-server.log — drop noisy pipe listeners.
+          this.process?.stdout?.removeAllListeners("data");
+          this.process?.stderr?.removeAllListeners("data");
+          this.process?.removeAllListeners("exit");
+          this.process = null;
+          this.ownsProcess = false;
           resolve(runtime);
         })
         .catch(fail);
@@ -174,18 +257,11 @@ export class SidecarManager {
   }
 
   async stop(): Promise<void> {
-    // Only stop a process we spawned; never kill an external vault-server.
     if (this.process && this.ownsProcess) {
-      this.process.kill("SIGTERM");
+      await this.terminatePid(this.process.pid ?? 0);
       this.process = null;
       this.ownsProcess = false;
-      if (fs.existsSync(this.runtimePath)) {
-        try {
-          fs.unlinkSync(this.runtimePath);
-        } catch {
-          /* ignore */
-        }
-      }
+      unlinkIfExists(this.runtimePath);
     }
   }
 
@@ -206,20 +282,22 @@ export class SidecarManager {
     }
   }
 
-  private waitForRuntime(timeoutMs: number): Promise<VaultRuntimeInfo> {
+  private waitForHealthyRuntime(timeoutMs: number): Promise<VaultRuntimeInfo> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
       const tick = () => {
-        const runtime = this.readRuntime();
-        if (runtime?.port) {
-          resolve(runtime);
-          return;
-        }
-        if (Date.now() - started > timeoutMs) {
-          reject(new Error("Timed out waiting for vault-server runtime.json"));
-          return;
-        }
-        setTimeout(tick, 250);
+        void (async () => {
+          const runtime = this.readRuntime();
+          if (runtime?.port && (await this.isHealthy(runtime))) {
+            resolve(runtime);
+            return;
+          }
+          if (Date.now() - started > timeoutMs) {
+            reject(new Error("Timed out waiting for vault-server HTTP endpoint"));
+            return;
+          }
+          setTimeout(tick, 250);
+        })();
       };
       tick();
     });

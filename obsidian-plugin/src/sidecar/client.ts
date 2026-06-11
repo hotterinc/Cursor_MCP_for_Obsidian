@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import type { AccessScope, SearchResult, VaultRuntimeInfo } from "../types";
+import type { AccessScope, IndexProgress, SearchResult, VaultRuntimeInfo, VaultStatus } from "../types";
 
 export class SidecarClient {
   constructor(private baseUrl: string) {}
@@ -30,9 +30,11 @@ export class SidecarClient {
   }
 
   status() {
-    return this.request<{ fileCount: number; indexStatus: string; job: unknown }>(
-      "/api/v1/status"
-    );
+    return this.request<VaultStatus>("/api/v1/status");
+  }
+
+  indexJobStatus() {
+    return this.status().then((s) => s.job);
   }
 
   search(query: string, topK = 10) {

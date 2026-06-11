@@ -11,6 +11,10 @@ from typing import Any
 from obsidian_context_mcp.shared.types import ChunkRecord, JobStatus
 
 
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, default=str)
+
+
 class SQLiteStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -152,9 +156,9 @@ class SQLiteStore:
                 mtime_ms,
                 sha256,
                 title,
-                json.dumps(frontmatter),
-                json.dumps(tags),
-                json.dumps(links),
+                _json_dumps(frontmatter),
+                _json_dumps(tags),
+                _json_dumps(links),
                 now,
                 now,
                 now,
@@ -227,13 +231,13 @@ class SQLiteStore:
                 chunk.file_id,
                 chunk.chunk_index,
                 chunk.chunk_hash,
-                json.dumps(chunk.heading_path),
+                _json_dumps(chunk.heading_path),
                 chunk.heading_level,
                 chunk.text,
                 chunk.token_count,
                 chunk.start_line,
                 chunk.end_line,
-                json.dumps(chunk.metadata),
+                _json_dumps(chunk.metadata),
                 now,
                 now,
             ),
@@ -284,7 +288,7 @@ class SQLiteStore:
         now = datetime.utcnow().isoformat() + "Z"
         self.conn.execute(
             "UPDATE index_jobs SET status=?, finished_at=?, stats_json=?, error=? WHERE id=?",
-            (status.value, now, json.dumps(stats), error, job_id),
+            (status.value, now, _json_dumps(stats), error, job_id),
         )
         self.conn.commit()
 

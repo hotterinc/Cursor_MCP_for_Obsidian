@@ -2,6 +2,7 @@ import { Notice, Plugin, setTooltip } from "obsidian";
 import { SidecarClient } from "./sidecar/client";
 import { SidecarManager } from "./sidecar/manager";
 import { resolvePluginDataDir, resolvePluginDir } from "./paths";
+import { watchReindexProgress, formatIndexStatus } from "./reindexProgress";
 import { ObsidianContextSettingTab } from "./settings";
 import { DEFAULT_SETTINGS, PluginSettings, VaultRuntimeInfo } from "./types";
 import { ScopesModal } from "./views/ScopesModal";
@@ -12,12 +13,15 @@ export default class ObsidianContextPlugin extends Plugin {
   private sidecar: SidecarManager | null = null;
   private client: SidecarClient | null = null;
   private runtime: VaultRuntimeInfo | null = null;
+  private startPromise: Promise<void> | null = null;
+  private settingTab: ObsidianContextSettingTab | null = null;
   statusText = "Not started";
 
   async onload() {
     try {
       await this.loadSettings();
-      this.addSettingTab(new ObsidianContextSettingTab(this.app, this));
+      this.settingTab = new ObsidianContextSettingTab(this.app, this);
+      this.addSettingTab(this.settingTab);
 
       const pluginDir = resolvePluginDir(this.app, this.manifest);
       const dataDir = resolvePluginDataDir(this.app, this.manifest);
@@ -59,6 +63,10 @@ export default class ObsidianContextPlugin extends Plugin {
         callback: () => void this.restartSidecarIfNeeded(),
       });
 
+      this.addRibbonIcon("scan-search", "Семантический поиск vault", () => {
+        void this.openSearchModal();
+      });
+
       const statusItem = this.addStatusBarItem();
       statusItem.setText("OCM");
       setTooltip(statusItem, this.statusText);
@@ -75,6 +83,19 @@ export default class ObsidianContextPlugin extends Plugin {
       this.statusText = `Plugin error: ${e}`;
       new Notice(`Obsidian Context MCP: ошибка загрузки — ${e}`);
     }
+  }
+
+  refreshSettingsDisplay(): void {
+    this.settingTab?.display();
+  }
+
+  private applyVaultStatus(status: { fileCount: number; vaultFileCount?: number; indexStatus: string }): void {
+    this.statusText = formatIndexStatus(
+      status.fileCount,
+      status.vaultFileCount ?? status.fileCount,
+      status.indexStatus
+    );
+    this.refreshSettingsDisplay();
   }
 
   private getVaultPath(): string | null {
@@ -113,13 +134,16 @@ export default class ObsidianContextPlugin extends Plugin {
   }
 
   async onunload() {
-    try {
-      await this.sidecar?.stop();
-    } catch (e) {
-      console.error("[obsidian-context-mcp] onunload:", e);
+    if (this.settings.stopServerOnQuit) {
+      try {
+        await this.sidecar?.forceStopForRestart();
+      } catch (e) {
+        console.error("[obsidian-context-mcp] stop on quit:", e);
+      }
     }
     this.client = null;
     this.runtime = null;
+    this.startPromise = null;
   }
 
   async loadSettings() {
@@ -130,13 +154,21 @@ export default class ObsidianContextPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  private async startSidecar() {
+  private async startSidecar(): Promise<void> {
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.startSidecarOnce().finally(() => {
+      this.startPromise = null;
+    });
+    return this.startPromise;
+  }
+
+  private async startSidecarOnce() {
     try {
       const sidecar = this.ensureSidecar();
       this.runtime = await sidecar.start();
       this.client = SidecarClient.fromRuntime(this.runtime);
       const status = await this.client.status();
-      this.statusText = `Indexed ${status.fileCount} files (${status.indexStatus})`;
+      this.applyVaultStatus(status);
     } catch (e) {
       console.error("[obsidian-context-mcp] startSidecar:", e);
       this.statusText = `Error: ${e}`;
@@ -176,10 +208,11 @@ export default class ObsidianContextPlugin extends Plugin {
   async reindexVault() {
     try {
       if (!this.client) await this.startSidecar();
-      await this.ensureClient().reindex("incremental");
-      const status = await this.client!.status();
-      this.statusText = `Indexed ${status.fileCount} files (${status.indexStatus})`;
-      new Notice("Reindex started");
+      const client = this.ensureClient();
+      await client.reindex("incremental");
+      await watchReindexProgress(() => client.indexJobStatus());
+      const status = await client.status();
+      this.applyVaultStatus(status);
     } catch (e) {
       new Notice(String(e));
       throw e;

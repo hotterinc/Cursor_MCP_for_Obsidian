@@ -78,6 +78,7 @@ class AccessScope(BaseModel):
     include: list[str] = Field(default_factory=lambda: ["**/*.md"])
     exclude: list[str] = Field(default_factory=list)
     write_access: bool = Field(default=False, alias="writeAccess")
+    write_include: list[str] = Field(default_factory=list, alias="writeInclude")
     can_reindex: bool = Field(default=False, alias="canReindex")
     token: str = ""
 

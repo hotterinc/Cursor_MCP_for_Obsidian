@@ -123,7 +123,26 @@ class ScopeBoundary:
     def resolve_write_path(self, relative_path: str) -> ResolvedPath:
         resolved = self._boundary.resolve_write_path(relative_path)
         self.assert_in_scope(resolved.relative_path)
+        self.assert_write_scope(resolved.relative_path)
         return resolved
+
+    def assert_write_scope(self, relative_path: str) -> None:
+        if self._scope is None or not self._scope.write_access:
+            return
+        patterns = self._scope.write_include or self._scope.include
+        if patterns and not path_in_scope(
+            relative_path,
+            AccessScope(
+                id=self._scope.id,
+                name=self._scope.name,
+                include=patterns,
+                exclude=self._scope.exclude,
+                token=self._scope.token,
+            ),
+        ):
+            raise ScopeAccessDeniedError(
+                f"Write to '{relative_path}' is outside allowed write folders for scope '{self._scope.name}'"
+            )
 
     def resolve_vault_root(self) -> str:
         return self._boundary.resolve_vault_root()

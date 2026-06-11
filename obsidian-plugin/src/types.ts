@@ -13,6 +13,7 @@ export interface AccessScope {
   include: string[];
   exclude: string[];
   writeAccess: boolean;
+  writeInclude?: string[];
   canReindex: boolean;
   token: string;
   tokenPreview?: string;
@@ -29,14 +30,39 @@ export interface SearchResult {
   text: string;
 }
 
+export interface IndexProgress {
+  job_id: string;
+  status: string;
+  total_files: number;
+  files_scanned: number;
+  files_indexed: number;
+  files_skipped: number;
+  files_failed: number;
+  chunks_created: number;
+  chunks_embedded: number;
+  current_file: string | null;
+  queue_size: number;
+  error: string | null;
+}
+
+export interface VaultStatus {
+  fileCount: number;
+  vaultFileCount: number;
+  indexStatus: string;
+  job: IndexProgress | null;
+}
+
 export interface PluginSettings {
   pythonCommand: string;
   sidecarArgs: string;
   autoStart: boolean;
+  /** Stop vault-server when Obsidian exits (plugin onunload). */
+  stopServerOnQuit: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   pythonCommand: "obsidian-context-mcp",
   sidecarArgs: "",
   autoStart: true,
+  stopServerOnQuit: false,
 };

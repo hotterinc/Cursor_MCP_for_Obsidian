@@ -32,12 +32,18 @@ class AdminApi:
         db = SQLiteStore(self.vault_ctx.work_context().db_path)
         db.initialize()
         prog = VaultIndexQueue.get().get_status()
+        vault_files = scan_markdown_files(
+            Path(self.vault_ctx.vault_real_path),
+            include=self.vault_ctx.config.include,
+            exclude=self.vault_ctx.config.exclude,
+        )
         return JSONResponse(
             {
                 "vaultId": self.vault_ctx.vault_id,
                 "vaultPath": self.vault_ctx.vault_path,
                 "indexStatus": self.vault_ctx.get_status().value,
                 "fileCount": len(db.get_all_files()),
+                "vaultFileCount": len(vault_files),
                 "job": prog.model_dump() if prog else None,
             }
         )
