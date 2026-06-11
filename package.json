@@ -19,6 +19,7 @@
     "plugin:build": "cd obsidian-plugin && npm run build",
     "plugin:sidecar": "bash scripts/build-plugin-sidecar.sh",
     "plugin:deploy": "bash scripts/install-obsidian-plugin.sh",
+    "plugin:release": "bash scripts/build-plugin-release.sh",
     "test": "pnpm python:test",
     "lint": "pnpm python:lint && pnpm lint:desktop",
     "typecheck": "pnpm python:typecheck && pnpm typecheck:desktop"
