@@ -196,6 +196,7 @@ function activeSidecarPath(pluginDir, pythonCommand) {
 }
 
 // src/sidecar/manager.ts
+var SIDECAR_STARTUP_TIMEOUT_MS = 12e4;
 async function healthCheck(url, timeoutMs) {
   try {
     const res = await Promise.race([
@@ -373,7 +374,12 @@ var SidecarManager = class {
           ],
           {
             stdio: ["ignore", "pipe", "pipe"],
-            detached: true
+            detached: true,
+            env: {
+              ...process.env,
+              TOKENIZERS_PARALLELISM: "false",
+              OMP_NUM_THREADS: "1"
+            }
           }
         );
         this.process.unref();
@@ -404,7 +410,7 @@ var SidecarManager = class {
           console.warn(`[vault-server] exited with code ${code}`);
         }
       });
-      this.waitForHealthyRuntime(3e4).then((runtime) => {
+      this.waitForHealthyRuntime(SIDECAR_STARTUP_TIMEOUT_MS).then((runtime) => {
         if (settled) return;
         settled = true;
         this.process?.stdout?.removeAllListeners("data");
@@ -440,6 +446,16 @@ var SidecarManager = class {
       return null;
     }
   }
+  /** Attach when server outlived the startup waiter (e.g. slow first launch). */
+  async tryAttachRunning() {
+    const runtime = this.readRuntime();
+    if (runtime?.port && await this.isHealthy(runtime)) {
+      this.ownsProcess = false;
+      this.process = null;
+      return runtime;
+    }
+    return null;
+  }
   waitForHealthyRuntime(timeoutMs) {
     const started = Date.now();
     return new Promise((resolve2, reject) => {
@@ -451,7 +467,16 @@ var SidecarManager = class {
             return;
           }
           if (Date.now() - started > timeoutMs) {
-            reject(new Error("Timed out waiting for vault-server HTTP endpoint"));
+            const late = this.readRuntime();
+            if (late?.port && await this.isHealthy(late)) {
+              resolve2(late);
+              return;
+            }
+            reject(
+              new Error(
+                "Timed out waiting for vault-server HTTP endpoint (\u043F\u0435\u0440\u0432\u044B\u0439 \u0437\u0430\u043F\u0443\u0441\u043A \u043C\u043E\u0436\u0435\u0442 \u0437\u0430\u043D\u044F\u0442\u044C \u0434\u043E 2 \u043C\u0438\u043D)"
+              )
+            );
             return;
           }
           setTimeout(tick, 250);
@@ -1634,6 +1659,15 @@ var ObsidianContextPlugin = class extends import_obsidian10.Plugin {
       this.applyVaultStatus(status);
       void this.syncLlmModelReady();
     } catch (e) {
+      const attached = await this.sidecar?.tryAttachRunning();
+      if (attached) {
+        this.runtime = attached;
+        this.client = SidecarClient.fromRuntime(attached);
+        const status = await this.client.status();
+        this.applyVaultStatus(status);
+        void this.syncLlmModelReady();
+        return;
+      }
       console.error("[obsidian-context-mcp] startSidecar:", e);
       this.statusText = `Error: ${e}`;
       this.client = null;

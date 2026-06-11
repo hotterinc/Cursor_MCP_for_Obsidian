@@ -195,6 +195,15 @@ export default class ObsidianContextPlugin extends Plugin {
       this.applyVaultStatus(status);
       void this.syncLlmModelReady();
     } catch (e) {
+      const attached = await this.sidecar?.tryAttachRunning();
+      if (attached) {
+        this.runtime = attached;
+        this.client = SidecarClient.fromRuntime(attached);
+        const status = await this.client.status();
+        this.applyVaultStatus(status);
+        void this.syncLlmModelReady();
+        return;
+      }
       console.error("[obsidian-context-mcp] startSidecar:", e);
       this.statusText = `Error: ${e}`;
       this.client = null;

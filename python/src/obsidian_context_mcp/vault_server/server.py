@@ -83,7 +83,6 @@ def run_vault_server(
     signal.signal(signal.SIGINT, _shutdown)
 
     watcher = VaultWatcher(ctx)
-    watcher.start()
 
     def _initial_index() -> None:
         db_path = ctx.work_context().db_path
@@ -93,11 +92,11 @@ def run_vault_server(
             indexer = Indexer(ctx)
             indexer.run(IndexMode.INCREMENTAL)
 
-    threading.Thread(target=_initial_index, daemon=True).start()
-
     def _on_startup() -> None:
         _write_runtime(resolved_data, port=chosen_port, host=host, vault_id=ctx.vault_id)
         logger.info("Vault server listening on http://{}:{}", host, chosen_port)
+        watcher.start()
+        threading.Thread(target=_initial_index, daemon=True).start()
 
     app = create_http_app(ctx, on_startup=_on_startup)
     try:

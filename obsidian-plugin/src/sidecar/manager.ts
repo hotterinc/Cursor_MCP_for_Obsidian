@@ -5,6 +5,9 @@ import { requestUrl } from "obsidian";
 import { resolveSidecarCommand } from "../paths";
 import type { VaultRuntimeInfo } from "../types";
 
+/** First PyInstaller cold start + embedding model load can exceed 30s. */
+const SIDECAR_STARTUP_TIMEOUT_MS = 120_000;
+
 async function healthCheck(url: string, timeoutMs: number): Promise<boolean> {
   try {
     const res = await Promise.race([
@@ -222,6 +225,11 @@ export class SidecarManager {
           {
             stdio: ["ignore", "pipe", "pipe"],
             detached: true,
+            env: {
+              ...process.env,
+              TOKENIZERS_PARALLELISM: "false",
+              OMP_NUM_THREADS: "1",
+            },
           }
         );
         this.process.unref();
@@ -258,7 +266,7 @@ export class SidecarManager {
         }
       });
 
-      this.waitForHealthyRuntime(30000)
+      this.waitForHealthyRuntime(SIDECAR_STARTUP_TIMEOUT_MS)
         .then((runtime) => {
           if (settled) return;
           settled = true;
@@ -300,6 +308,17 @@ export class SidecarManager {
     }
   }
 
+  /** Attach when server outlived the startup waiter (e.g. slow first launch). */
+  async tryAttachRunning(): Promise<VaultRuntimeInfo | null> {
+    const runtime = this.readRuntime();
+    if (runtime?.port && (await this.isHealthy(runtime))) {
+      this.ownsProcess = false;
+      this.process = null;
+      return runtime;
+    }
+    return null;
+  }
+
   private waitForHealthyRuntime(timeoutMs: number): Promise<VaultRuntimeInfo> {
     const started = Date.now();
     return new Promise((resolve, reject) => {
@@ -311,7 +330,16 @@ export class SidecarManager {
             return;
           }
           if (Date.now() - started > timeoutMs) {
-            reject(new Error("Timed out waiting for vault-server HTTP endpoint"));
+            const late = this.readRuntime();
+            if (late?.port && (await this.isHealthy(late))) {
+              resolve(late);
+              return;
+            }
+            reject(
+              new Error(
+                "Timed out waiting for vault-server HTTP endpoint (первый запуск может занять до 2 мин)"
+              )
+            );
             return;
           }
           setTimeout(tick, 250);

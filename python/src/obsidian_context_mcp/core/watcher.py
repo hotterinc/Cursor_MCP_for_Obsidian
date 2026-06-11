@@ -32,7 +32,12 @@ class VaultWatcherHandler(FileSystemEventHandler):
         self.on_event = on_event
         self._pending: dict[str, threading.Timer] = {}
         self._lock = threading.Lock()
-        self._indexer = Indexer(ctx)
+        self._indexer: Indexer | None = None
+
+    def _get_indexer(self) -> Indexer:
+        if self._indexer is None:
+            self._indexer = Indexer(self.ctx)
+        return self._indexer
 
     def _vault_real_path(self) -> str:
         if isinstance(self.ctx, VaultContext):
@@ -47,7 +52,7 @@ class VaultWatcherHandler(FileSystemEventHandler):
 
             def _process() -> None:
                 try:
-                    self._indexer.index_file(rel)
+                    self._get_indexer().index_file(rel)
                     if self.on_event:
                         self.on_event(event_type, rel)
                 except Exception:
