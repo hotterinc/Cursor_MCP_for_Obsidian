@@ -1,6 +1,6 @@
 {
   "name": "obsidian-context-mcp",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "private": true,
   "description": "Local MCP server connecting Cursor projects to Obsidian documentation",
   "onlyBuiltDependencies": ["electron", "esbuild"],

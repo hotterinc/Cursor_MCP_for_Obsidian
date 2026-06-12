@@ -10,28 +10,34 @@ export class SearchModal extends Modal {
   }
 
   onOpen() {
-    const { contentEl } = this;
+    const { contentEl, modalEl } = this;
+    modalEl.addClass("ocm-search-modal");
     contentEl.createEl("h2", { text: "Semantic search" });
 
     let query = "";
-    new Setting(contentEl)
+    const querySetting = new Setting(contentEl)
       .setName("Query")
-      .addText((text) =>
-        text.setPlaceholder("Search vault...").onChange((v) => {
+      .setClass("ocm-query-setting");
+    querySetting.addTextArea((text) => {
+      text
+        .setPlaceholder("Search vault…")
+        .onChange((v) => {
           query = v;
-        })
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Search").setCta().onClick(async () => {
-          try {
-            const res = await this.client.search(query, 15);
-            this.results = res.results;
-            this.renderResults();
-          } catch (e) {
-            new Notice(`Search failed: ${e}`);
-          }
-        })
-      );
+        });
+      text.inputEl.rows = 5;
+      text.inputEl.addClass("ocm-query-input");
+    });
+    querySetting.addButton((btn) =>
+      btn.setButtonText("Search").setCta().onClick(async () => {
+        try {
+          const res = await this.client.search(query.trim(), 15);
+          this.results = res.results;
+          this.renderResults();
+        } catch (e) {
+          new Notice(`Search failed: ${e}`);
+        }
+      })
+    );
 
     this.resultContainer = contentEl.createDiv({ cls: "ocm-search-results" });
   }

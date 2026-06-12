@@ -1,6 +1,6 @@
 [project]
 name = "obsidian-context-mcp"
-version = "0.2.6"
+version = "0.2.7"
 description = "Local MCP server for Cursor + Obsidian documentation context"
 readme = "README.md"
 requires-python = ">=3.11"

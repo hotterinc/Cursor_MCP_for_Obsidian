@@ -50,8 +50,61 @@
   background: var(--interactive-accent);
   transition: width 0.3s ease;
 }
-.ocm-llm-modal { width: min(720px, 92vw) !important; }
-.ocm-llm-answer { margin: 16px 0; padding: 12px; border-radius: 8px; background: var(--background-secondary); white-space: pre-wrap; line-height: 1.5; }
+.modal.ocm-search-modal,
+.modal.ocm-llm-modal {
+  width: min(960px, 94vw) !important;
+  max-width: 94vw;
+  height: min(88vh, 920px) !important;
+  max-height: 92vh;
+}
+.modal.ocm-search-modal .modal-content,
+.modal.ocm-llm-modal .modal-content {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(88vh - 72px);
+  overflow-y: auto;
+}
+.ocm-query-setting {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.ocm-query-setting .setting-item-info {
+  margin-bottom: 0;
+}
+.ocm-query-setting .setting-item-control {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.ocm-query-input,
+.ocm-query-setting textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  line-height: 1.45;
+  font-size: 0.95em;
+}
+.ocm-search-results {
+  flex: 1;
+  min-height: 200px;
+  max-height: 48vh;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.ocm-llm-answer {
+  margin: 16px 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  white-space: pre-wrap;
+  line-height: 1.5;
+  min-height: 120px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
 .ocm-llm-answer-text { white-space: pre-wrap; }
 .ocm-llm-error { color: var(--text-error); }
-.ocm-llm-sources { margin-top: 16px; }
+.ocm-llm-sources { margin-top: 16px; max-height: 28vh; overflow-y: auto; }

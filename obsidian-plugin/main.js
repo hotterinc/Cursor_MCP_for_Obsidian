@@ -1408,17 +1408,22 @@ var SearchModal = class extends import_obsidian8.Modal {
     this.results = [];
   }
   onOpen() {
-    const { contentEl } = this;
+    const { contentEl, modalEl } = this;
+    modalEl.addClass("ocm-search-modal");
     contentEl.createEl("h2", { text: "Semantic search" });
     let query = "";
-    new import_obsidian8.Setting(contentEl).setName("Query").addText(
-      (text) => text.setPlaceholder("Search vault...").onChange((v) => {
+    const querySetting = new import_obsidian8.Setting(contentEl).setName("Query").setClass("ocm-query-setting");
+    querySetting.addTextArea((text) => {
+      text.setPlaceholder("Search vault\u2026").onChange((v) => {
         query = v;
-      })
-    ).addButton(
+      });
+      text.inputEl.rows = 5;
+      text.inputEl.addClass("ocm-query-input");
+    });
+    querySetting.addButton(
       (btn) => btn.setButtonText("Search").setCta().onClick(async () => {
         try {
-          const res = await this.client.search(query, 15);
+          const res = await this.client.search(query.trim(), 15);
           this.results = res.results;
           this.renderResults();
         } catch (e) {
@@ -1473,11 +1478,15 @@ var LlmSearchModal = class extends import_obsidian9.Modal {
       text: `\u041C\u043E\u0434\u0435\u043B\u044C: ${cfg.model} \xB7 \u043F\u043E\u0438\u0441\u043A \u043F\u043E \u0438\u043D\u0434\u0435\u043A\u0441\u0443 + \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u043E\u0442\u0432\u0435\u0442`
     });
     let query = "";
-    new import_obsidian9.Setting(contentEl).setName("\u0412\u043E\u043F\u0440\u043E\u0441").addText(
-      (text) => text.setPlaceholder("\u041A\u0430\u043A \u043D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C scopes \u0434\u043B\u044F Cursor?").onChange((v) => {
+    const querySetting = new import_obsidian9.Setting(contentEl).setName("\u0412\u043E\u043F\u0440\u043E\u0441").setClass("ocm-query-setting");
+    querySetting.addTextArea((text) => {
+      text.setPlaceholder("\u041A\u0430\u043A \u043D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C scopes \u0434\u043B\u044F Cursor?").onChange((v) => {
         query = v;
-      })
-    ).addButton(
+      });
+      text.inputEl.rows = 5;
+      text.inputEl.addClass("ocm-query-input");
+    });
+    querySetting.addButton(
       (btn) => btn.setButtonText("\u0421\u043F\u0440\u043E\u0441\u0438\u0442\u044C").setCta().onClick(() => void this.runAsk(query, btn))
     );
     this.answerEl = contentEl.createDiv({ cls: "ocm-llm-answer" });

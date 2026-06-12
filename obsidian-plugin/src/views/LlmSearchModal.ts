@@ -30,18 +30,21 @@ export class LlmSearchModal extends Modal {
     });
 
     let query = "";
-    new Setting(contentEl)
+    const querySetting = new Setting(contentEl)
       .setName("Вопрос")
-      .addText((text) =>
-        text
-          .setPlaceholder("Как настроить scopes для Cursor?")
-          .onChange((v) => {
-            query = v;
-          })
-      )
-      .addButton((btn) =>
-        btn.setButtonText("Спросить").setCta().onClick(() => void this.runAsk(query, btn))
-      );
+      .setClass("ocm-query-setting");
+    querySetting.addTextArea((text) => {
+      text
+        .setPlaceholder("Как настроить scopes для Cursor?")
+        .onChange((v) => {
+          query = v;
+        });
+      text.inputEl.rows = 5;
+      text.inputEl.addClass("ocm-query-input");
+    });
+    querySetting.addButton((btn) =>
+      btn.setButtonText("Спросить").setCta().onClick(() => void this.runAsk(query, btn))
+    );
 
     this.answerEl = contentEl.createDiv({ cls: "ocm-llm-answer" });
     this.sourcesEl = contentEl.createDiv({ cls: "ocm-llm-sources" });
