@@ -10,6 +10,7 @@ from typing import Union
 
 from loguru import logger
 
+from obsidian_context_mcp.core.chunker import chunk_note
 from obsidian_context_mcp.core.index_serial import INDEX_SERIAL_LOCK
 from obsidian_context_mcp.core.embeddings import create_embedding_provider
 from obsidian_context_mcp.core.locks import ProjectLock
@@ -238,6 +239,7 @@ class Indexer:
                     progress.files_indexed = stats["files_indexed"]
                     self._emit(progress_callback, progress)
                 except Exception:
+                    logger.exception("Failed to index {}", rel)
                     stats["files_failed"] += 1
                     progress.files_failed = stats["files_failed"]
                     self._emit(progress_callback, progress)
