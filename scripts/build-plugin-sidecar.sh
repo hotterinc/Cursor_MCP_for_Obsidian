@@ -5,30 +5,40 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="$ROOT/obsidian-plugin/bin"
 PY_DIR="$ROOT/python"
-
-if [[ -x "$PY_DIR/.venv/bin/python" ]]; then
-  PYTHON="$PY_DIR/.venv/bin/python"
-elif command -v uv >/dev/null 2>&1; then
-  cd "$PY_DIR"
-  uv sync --all-extras
-  PYTHON="$(uv run which python)"
-else
-  PYTHON="${PYTHON:-python3}"
-fi
+LLAMA_INDEX="${LLAMA_INDEX:-https://abetlen.github.io/llama-cpp-python/whl/cpu}"
+VENV_PYTHON="$PY_DIR/.venv/bin/python"
 
 cd "$PY_DIR"
-"$PYTHON" -m pip install -q pyinstaller
 
-"$PYTHON" -m PyInstaller --noconfirm obsidian-context-mcp.spec
+if [[ ! -x "$VENV_PYTHON" ]]; then
+  if command -v uv >/dev/null 2>&1; then
+    uv python install 3.12
+    uv venv --python 3.12 .venv
+  else
+    echo "uv is required to create the Python venv" >&2
+    exit 1
+  fi
+fi
+
+echo "==> Installing Python deps (llama-cpp CPU wheels)..."
+"$VENV_PYTHON" -m pip install -q pyinstaller
+if command -v uv >/dev/null 2>&1; then
+  uv pip install --python "$VENV_PYTHON" -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
+else
+  "$VENV_PYTHON" -m pip install -q -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
+fi
+
+echo "==> Running PyInstaller..."
+"$VENV_PYTHON" -m PyInstaller --noconfirm obsidian-context-mcp.spec
 
 mkdir -p "$OUT_DIR"
 if [[ -f dist/obsidian-context-mcp ]]; then
   install -m 755 dist/obsidian-context-mcp "$OUT_DIR/obsidian-context-mcp"
+  echo "Built sidecar: $OUT_DIR/obsidian-context-mcp ($(du -h "$OUT_DIR/obsidian-context-mcp" | cut -f1))"
 elif [[ -f dist/obsidian-context-mcp.exe ]]; then
   install -m 755 dist/obsidian-context-mcp.exe "$OUT_DIR/obsidian-context-mcp.exe"
+  echo "Built sidecar: $OUT_DIR/obsidian-context-mcp.exe ($(du -h "$OUT_DIR/obsidian-context-mcp.exe" | cut -f1))"
 else
   echo "PyInstaller output not found in python/dist/" >&2
   exit 1
 fi
-
-echo "Built sidecar: $OUT_DIR/obsidian-context-mcp ($(du -h "$OUT_DIR/obsidian-context-mcp" | cut -f1))"

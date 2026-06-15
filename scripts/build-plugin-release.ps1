@@ -13,7 +13,8 @@ $Version = if ($env:VERSION) { $env:VERSION } else {
 $Dist = Join-Path $Root "dist\release"
 $Stage = Join-Path $Dist "obsidian-context-mcp"
 $Arch = if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -eq "Arm64") { "arm64" } else { "x64" }
-$ZipName = "obsidian-context-mcp-$Version-windows-$Arch.zip"
+$Platform = if ($env:RELEASE_PLATFORM) { $env:RELEASE_PLATFORM } else { "windows-$Arch" }
+$ZipName = "obsidian-context-mcp-$Version-$Platform.zip"
 $ZipPath = Join-Path $Dist $ZipName
 $SidecarSrc = Join-Path $PluginSrc "bin\obsidian-context-mcp.exe"
 
@@ -60,7 +61,7 @@ $install = @"
 Windows first run: if SmartScreen blocks `obsidian-context-mcp.exe`, choose More info -> Run anyway.
 The `data/` folder (index, scopes, logs) is created on first run and is not included in the zip.
 
-Build platform: windows-$Arch
+Build platform: $Platform
 Version: $Version
 "@
 Set-Content -Path (Join-Path $Stage "INSTALL.md") -Value $install -Encoding UTF8
