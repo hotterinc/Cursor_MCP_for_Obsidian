@@ -14,6 +14,7 @@ def configure_ml_runtime(*, data_dir: Path | None = None) -> None:
     if _configured:
         return
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")

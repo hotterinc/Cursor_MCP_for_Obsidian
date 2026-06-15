@@ -26,6 +26,9 @@ hiddenimports = [
     "numpy.linalg._umath_linalg",
     "numpy.core._multiarray_umath",
     "llama_cpp",
+    # CPU wheels still ship torch.cuda stubs; sentence-transformers imports them.
+    "torch.cuda",
+    "torch.backends.cuda",
 ]
 
 hiddenimports += collect_submodules("obsidian_context_mcp")
@@ -69,8 +72,6 @@ excludes = [
     "unittest",
     "torch.distributed",
     "torch.testing",
-    "torch.cuda",
-    "torch.backends.cuda",
     "torch.backends.cudnn",
     "torchvision",
     "torchaudio",
