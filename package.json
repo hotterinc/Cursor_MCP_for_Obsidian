@@ -20,6 +20,8 @@
     "plugin:sidecar": "bash scripts/build-plugin-sidecar.sh",
     "plugin:deploy": "bash scripts/install-obsidian-plugin.sh",
     "plugin:release": "bash scripts/build-plugin-release.sh",
+    "plugin:release:win": "powershell -ExecutionPolicy Bypass -File scripts/build-plugin-release.ps1",
+    "plugin:sidecar:win": "powershell -ExecutionPolicy Bypass -File scripts/build-plugin-sidecar.ps1",
     "test": "pnpm python:test",
     "lint": "pnpm python:lint && pnpm lint:desktop",
     "typecheck": "pnpm python:typecheck && pnpm typecheck:desktop"

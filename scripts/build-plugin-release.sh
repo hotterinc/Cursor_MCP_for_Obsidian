@@ -37,7 +37,18 @@ mkdir -p "$STAGE/bin"
 install -m 644 "$PLUGIN_SRC/manifest.json" "$STAGE/"
 install -m 644 "$PLUGIN_SRC/main.js" "$STAGE/"
 install -m 644 "$PLUGIN_SRC/styles.css" "$STAGE/"
-install -m 755 "$PLUGIN_SRC/bin/obsidian-context-mcp" "$STAGE/bin/"
+
+if [[ -f "$PLUGIN_SRC/bin/obsidian-context-mcp.exe" ]]; then
+  install -m 755 "$PLUGIN_SRC/bin/obsidian-context-mcp.exe" "$STAGE/bin/"
+  PLATFORM_NOTE="Первый запуск на Windows: если SmartScreen блокирует \`obsidian-context-mcp.exe\`, нажмите «Подробнее» → «Выполнить в любом случае»."
+elif [[ -f "$PLUGIN_SRC/bin/obsidian-context-mcp" ]]; then
+  install -m 755 "$PLUGIN_SRC/bin/obsidian-context-mcp" "$STAGE/bin/"
+  PLATFORM_NOTE="Первый запуск на macOS: если vault-server не стартует, в Terminal выполните:
+\`xattr -dr com.apple.quarantine \"ВашVault/.obsidian/plugins/obsidian-context-mcp\"\`"
+else
+  echo "Sidecar binary not found in $PLUGIN_SRC/bin/" >&2
+  exit 1
+fi
 
 cat > "$STAGE/INSTALL.md" <<EOF
 # Obsidian Context MCP — установка
@@ -48,8 +59,7 @@ cat > "$STAGE/INSTALL.md" <<EOF
 3. Obsidian → Settings → Community plugins → включите **Obsidian Context MCP**.
 4. Settings плагина → **Access scopes** → создайте scope → **Copy JSON** → вставьте в Cursor \`.cursor/mcp.json\`.
 
-Первый запуск на macOS: если vault-server не стартует, в Terminal выполните:
-\`xattr -dr com.apple.quarantine "ВашVault/.obsidian/plugins/obsidian-context-mcp"\`
+${PLATFORM_NOTE}
 
 Папка \`data/\` (индекс, scopes, логи) создаётся автоматически при первом запуске — в архиве её нет намеренно.
 
