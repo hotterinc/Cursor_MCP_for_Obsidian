@@ -15,6 +15,23 @@ block_torch_cuda = (
     "cusolver",
 )
 
+def _filter_cuda_binaries(entries: list) -> list:
+    return [
+        entry
+        for entry in entries
+        if not any(token in entry[0].lower() for token in block_torch_cuda)
+    ]
+
+
+def _filter_test_assets(entries: list) -> list:
+    return [
+        entry
+        for entry in entries
+        if "/test" not in entry[0].replace("\\", "/").lower()
+        and "/tests/" not in entry[0].replace("\\", "/").lower()
+    ]
+
+
 hiddenimports = [
     "obsidian_context_mcp",
     "uvicorn",
@@ -26,6 +43,10 @@ hiddenimports = [
     "numpy.linalg._umath_linalg",
     "numpy.core._multiarray_umath",
     "llama_cpp",
+    "torch",
+    "sentence_transformers",
+    "transformers",
+    "safetensors",
     # CPU wheels ship these stubs; transformers/sentence-transformers import them.
     "torch.cuda",
     "torch.backends.cuda",
@@ -39,26 +60,27 @@ datas: list = []
 binaries: list = []
 
 # Keep collect_all narrow — broad collection blows past GitHub's 2 GiB release limit on Linux ARM.
-for pkg in ("chromadb_rust_bindings", "tokenizers", "onnxruntime", "llama_cpp"):
+for pkg in (
+    "chromadb_rust_bindings",
+    "tokenizers",
+    "onnxruntime",
+    "llama_cpp",
+    "torch",
+    "sentence_transformers",
+    "transformers",
+    "safetensors",
+):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
-    datas += pkg_datas
-    binaries += pkg_binaries
+    datas += _filter_test_assets(pkg_datas)
+    binaries += _filter_cuda_binaries(pkg_binaries)
     hiddenimports += pkg_hidden
 
-binaries += collect_dynamic_libs("numpy")
-binaries += collect_dynamic_libs("llama_cpp")
+binaries += _filter_cuda_binaries(collect_dynamic_libs("numpy"))
+binaries += _filter_cuda_binaries(collect_dynamic_libs("llama_cpp"))
+binaries += _filter_cuda_binaries(collect_dynamic_libs("torch"))
 
-binaries = [
-    entry
-    for entry in binaries
-    if not any(token in entry[0].lower() for token in block_torch_cuda)
-]
-datas = [
-    entry
-    for entry in datas
-    if "/test" not in entry[0].replace("\\", "/").lower()
-    and "/tests/" not in entry[0].replace("\\", "/").lower()
-]
+binaries = _filter_cuda_binaries(binaries)
+datas = _filter_test_assets(datas)
 
 excludes = [
     "tkinter",
@@ -77,7 +99,7 @@ excludes = [
 ]
 
 a = Analysis(
-    ["src/obsidian_context_mcp/__main__.py"],
+    ["src/obsidian_context_mcp/__main__.py", "pyinstaller_hidden_imports.py"],
     pathex=["src"],
     binaries=binaries,
     datas=datas,
