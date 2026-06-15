@@ -21,18 +21,21 @@ hiddenimports = [
     "starlette.routing",
     "mcp.server.sse",
     "chromadb.telemetry.product.posthog",
+    "chromadb.api.rust",
+    "chromadb_rust_bindings",
     "numpy.linalg._umath_linalg",
     "numpy.core._multiarray_umath",
     "llama_cpp",
 ]
 
 hiddenimports += collect_submodules("obsidian_context_mcp")
+hiddenimports += collect_submodules("chromadb")
 
 datas: list = []
 binaries: list = []
 
 # Keep collect_all narrow — broad collection blows past GitHub's 2 GiB release limit on Linux ARM.
-for pkg in ("tokenizers", "onnxruntime", "llama_cpp"):
+for pkg in ("chromadb_rust_bindings", "tokenizers", "onnxruntime", "llama_cpp"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas
     binaries += pkg_binaries
