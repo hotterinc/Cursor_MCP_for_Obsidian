@@ -23,15 +23,14 @@ fi
 echo "==> Installing Python deps (llama-cpp CPU wheels)..."
 "$UV" pip install pyinstaller
 
-PIP_CONSTRAINT_ARGS=()
 if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "x86_64" ]]; then
   echo "==> Pinning onnxruntime 1.23.2 (last release with Intel Mac wheels)..."
   CONSTRAINT_FILE="$(mktemp)"
   echo "onnxruntime==1.23.2" > "$CONSTRAINT_FILE"
-  PIP_CONSTRAINT_ARGS=(--constraint "$CONSTRAINT_FILE")
+  "$UV" pip install --constraint "$CONSTRAINT_FILE" -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
+else
+  "$UV" pip install -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
 fi
-
-"$UV" pip install "${PIP_CONSTRAINT_ARGS[@]}" -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
 
 echo "==> Running PyInstaller..."
 "$UV" run python -m PyInstaller --noconfirm obsidian-context-mcp.spec
