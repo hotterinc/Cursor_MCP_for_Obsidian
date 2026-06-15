@@ -24,16 +24,20 @@ echo "==> Installing Python deps (llama-cpp CPU wheels)..."
 "$UV" pip install pyinstaller
 
 if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "x86_64" ]]; then
-  echo "==> Pinning onnxruntime 1.23.2 (last release with Intel Mac wheels)..."
+  echo "==> Pinning Intel Mac wheels (onnxruntime 1.23.2, torch 2.2.2)..."
   CONSTRAINT_FILE="$(mktemp)"
-  echo "onnxruntime==1.23.2" > "$CONSTRAINT_FILE"
+  cat > "$CONSTRAINT_FILE" <<'EOF'
+onnxruntime==1.23.2
+torch==2.2.2
+EOF
   "$UV" pip install --constraint "$CONSTRAINT_FILE" -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
 else
   "$UV" pip install -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
 fi
 
 echo "==> Running PyInstaller..."
-"$UV" run python -m PyInstaller --noconfirm obsidian-context-mcp.spec
+# Use the venv interpreter: `uv run` would re-sync uv.lock and pull incompatible wheels on Intel Mac.
+"$PY_DIR/.venv/bin/python" -m PyInstaller --noconfirm obsidian-context-mcp.spec
 
 mkdir -p "$OUT_DIR"
 if [[ -f dist/obsidian-context-mcp ]]; then

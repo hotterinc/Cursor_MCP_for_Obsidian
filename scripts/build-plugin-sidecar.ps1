@@ -20,7 +20,7 @@ try {
     uv pip install -e ".[dev]" --extra-index-url $LlamaIndex
 
     Write-Host "Running PyInstaller (may take several minutes)..."
-    uv run python -m PyInstaller --noconfirm obsidian-context-mcp.spec
+    & (Join-Path $PyDir ".venv\Scripts\python.exe") -m PyInstaller --noconfirm obsidian-context-mcp.spec
 } finally {
     Pop-Location
 }
