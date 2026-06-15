@@ -12,13 +12,13 @@ Push-Location $PyDir
 try {
     if (-not (Test-Path $VenvPython)) {
         Write-Host "Creating venv (Python 3.12)..."
-        python -m uv python install 3.12
-        python -m uv venv --python 3.12 .venv
+        uv python install 3.12
+        uv venv --python 3.12 .venv
     }
 
     Write-Host "Installing dependencies..."
-    & $VenvPython -m pip install -q pyinstaller
-    & python -m uv pip install --python $VenvPython -e ".[dev]" --extra-index-url $LlamaIndex
+    uv pip install --python $VenvPython pyinstaller
+    uv pip install --python $VenvPython -e ".[dev]" --extra-index-url $LlamaIndex
 
     Write-Host "Running PyInstaller (may take several minutes)..."
     & $VenvPython -m PyInstaller --noconfirm obsidian-context-mcp.spec

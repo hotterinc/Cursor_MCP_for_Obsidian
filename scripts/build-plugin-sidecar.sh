@@ -7,26 +7,22 @@ OUT_DIR="$ROOT/obsidian-plugin/bin"
 PY_DIR="$ROOT/python"
 LLAMA_INDEX="${LLAMA_INDEX:-https://abetlen.github.io/llama-cpp-python/whl/cpu}"
 VENV_PYTHON="$PY_DIR/.venv/bin/python"
+UV="${UV:-uv}"
 
 cd "$PY_DIR"
 
 if [[ ! -x "$VENV_PYTHON" ]]; then
-  if command -v uv >/dev/null 2>&1; then
-    uv python install 3.12
-    uv venv --python 3.12 .venv
-  else
+  if ! command -v "$UV" >/dev/null 2>&1; then
     echo "uv is required to create the Python venv" >&2
     exit 1
   fi
+  "$UV" python install 3.12
+  "$UV" venv --python 3.12 .venv
 fi
 
 echo "==> Installing Python deps (llama-cpp CPU wheels)..."
-"$VENV_PYTHON" -m pip install -q pyinstaller
-if command -v uv >/dev/null 2>&1; then
-  uv pip install --python "$VENV_PYTHON" -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
-else
-  "$VENV_PYTHON" -m pip install -q -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
-fi
+"$UV" pip install --python "$VENV_PYTHON" pyinstaller
+"$UV" pip install --python "$VENV_PYTHON" -e ".[dev]" --extra-index-url "$LLAMA_INDEX"
 
 echo "==> Running PyInstaller..."
 "$VENV_PYTHON" -m PyInstaller --noconfirm obsidian-context-mcp.spec
