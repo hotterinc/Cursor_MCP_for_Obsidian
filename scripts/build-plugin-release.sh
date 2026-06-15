@@ -111,7 +111,38 @@ rm -f "$ZIP_PATH"
     -x "*.pyc"
 )
 
+bash "$ROOT/scripts/split-release-zip.sh" "$ZIP_PATH"
+
+if [[ ! -f "$ZIP_PATH" && -f "${ZIP_PATH}.aa" ]]; then
+  cat >> "$STAGE/INSTALL.md" <<EOF
+
+## Split archive (GitHub 2 GiB limit)
+
+This platform build is large. Download **all** \`${ZIP_NAME}.*\` parts from the release page, then reassemble:
+
+\`\`\`bash
+cat ${ZIP_NAME}.* > ${ZIP_NAME}
+\`\`\`
+
+Then unpack \`${ZIP_NAME}\` as usual.
+EOF
+  rm -f "$DIST/$ZIP_NAME" "${ZIP_PATH}".*
+  (
+    cd "$DIST"
+    zip -r -q "$ZIP_NAME" obsidian-context-mcp \
+      -x "*.DS_Store" \
+      -x "*__pycache__*" \
+      -x "*.pyc"
+  )
+  bash "$ROOT/scripts/split-release-zip.sh" "$ZIP_PATH"
+fi
+
 echo ""
-echo "Release zip: $ZIP_PATH ($(du -h "$ZIP_PATH" | cut -f1))"
+if [[ -f "$ZIP_PATH" ]]; then
+  echo "Release zip: $ZIP_PATH ($(du -h "$ZIP_PATH" | cut -f1))"
+else
+  echo "Release zip parts:"
+  ls -lh "${ZIP_PATH}."* 2>/dev/null || true
+fi
 echo "Contents:"
 find "$STAGE" -type f | sed "s|$STAGE/|  |"

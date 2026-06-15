@@ -3,34 +3,36 @@
 
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules
 
+block_torch_cuda = (
+    "cuda",
+    "cudnn",
+    "nvidia",
+    "cublas",
+    "cusparse",
+    "nccl",
+    "cufft",
+    "curand",
+    "cusolver",
+)
+
 hiddenimports = [
     "obsidian_context_mcp",
     "uvicorn",
     "starlette.routing",
     "mcp.server.sse",
-    # chromadb telemetry (lazy-imported, easy to miss)
     "chromadb.telemetry.product.posthog",
-    # numpy compiled extensions (fixes _umath_linalg import in onefile bundles)
     "numpy.linalg._umath_linalg",
     "numpy.core._multiarray_umath",
+    "llama_cpp",
 ]
 
 hiddenimports += collect_submodules("obsidian_context_mcp")
-hiddenimports += collect_submodules("chromadb")
-hiddenimports += collect_submodules("llama_cpp")
 
 datas: list = []
 binaries: list = []
 
-for pkg in (
-    "numpy",
-    "chromadb",
-    "sentence_transformers",
-    "sklearn",
-    "onnxruntime",
-    "tokenizers",
-    "llama_cpp",
-):
+# Keep collect_all narrow — broad collection blows past GitHub's 2 GiB release limit on Linux ARM.
+for pkg in ("tokenizers", "onnxruntime", "llama_cpp"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas
     binaries += pkg_binaries
@@ -38,6 +40,38 @@ for pkg in (
 
 binaries += collect_dynamic_libs("numpy")
 binaries += collect_dynamic_libs("llama_cpp")
+
+binaries = [
+    entry
+    for entry in binaries
+    if not any(token in entry[0].lower() for token in block_torch_cuda)
+]
+datas = [
+    entry
+    for entry in datas
+    if "/test" not in entry[0].replace("\\", "/").lower()
+    and "/tests/" not in entry[0].replace("\\", "/").lower()
+]
+
+excludes = [
+    "tkinter",
+    "matplotlib",
+    "IPython",
+    "jupyter",
+    "notebook",
+    "pandas",
+    "tensorflow",
+    "jax",
+    "pytest",
+    "unittest",
+    "torch.distributed",
+    "torch.testing",
+    "torch.cuda",
+    "torch.backends.cuda",
+    "torch.backends.cudnn",
+    "torchvision",
+    "torchaudio",
+]
 
 a = Analysis(
     ["src/obsidian_context_mcp/__main__.py"],
@@ -48,7 +82,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=["pyinstaller_runtime_llama.py"],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
     optimize=0,
 )

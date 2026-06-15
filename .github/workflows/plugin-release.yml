@@ -68,10 +68,19 @@ jobs:
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts/build-plugin-release.ps1
 
+      - name: Show release artifact sizes
+        shell: bash
+        run: |
+          shopt -s nullglob
+          ls -lh dist/release/*.zip dist/release/*.zip.* 2>/dev/null || true
+          du -h dist/release/obsidian-context-mcp/bin/* 2>/dev/null || true
+
       - name: Upload release asset
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-          files: dist/release/*.zip
+          files: |
+            dist/release/*.zip
+            dist/release/*.zip.*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
