@@ -1,6 +1,6 @@
 [project]
 name = "obsidian-context-mcp"
-version = "0.2.8"
+version = "0.2.9"
 description = "Local MCP server for Cursor + Obsidian documentation context"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -85,7 +85,7 @@ override-dependencies = [
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform != 'darwin'" },
 ]
-llama-cpp-python = { index = "llama-cpu" }
+llama-cpp-python = { index = "llama-cpu", marker = "sys_platform != 'darwin'" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.2.8)"
+        description: "Release tag (e.g. v0.2.9)"
         required: true
-        default: "v0.2.8"
+        default: "v0.2.9"
 
 permissions:
   contents: write
@@ -36,13 +36,12 @@ jobs:
             release_platform: linux-arm64
           - runs-on: windows-latest
             release_platform: windows-x64
-          - runs-on: windows-11-arm
-            release_platform: windows-arm64
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 120
     env:
       RELEASE_PLATFORM: ${{ matrix.release_platform }}
       SKIP_PLUGIN_UI: "1"
+      CMAKE_ARGS: -DGGML_NATIVE=off
     steps:
       - uses: actions/checkout@v6
         with:
@@ -104,6 +103,7 @@ jobs:
             python/.venv/Scripts/python.exe scripts/smoke-frozen-vault.py obsidian-plugin/bin/obsidian-context-mcp.exe
           else
             python/.venv/bin/python scripts/smoke-frozen-vault.py obsidian-plugin/bin/obsidian-context-mcp
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
