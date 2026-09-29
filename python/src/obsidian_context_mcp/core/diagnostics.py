@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 from obsidian_context_mcp.core.app_paths import get_app_data_dir, get_project_db_path
 from obsidian_context_mcp.core.embeddings import create_embedding_provider
@@ -18,7 +19,7 @@ from obsidian_context_mcp.core.vector_store import create_vector_store, create_v
 from obsidian_context_mcp.shared.types import DiagnosticCheck, DiagnosticStatus
 
 
-def _check(name: str, ok: bool, message: str, *, warn: bool = False, details: dict | None = None) -> DiagnosticCheck:
+def _check(name: str, ok: bool, message: str, *, warn: bool = False, details: dict[str, Any] | None = None) -> DiagnosticCheck:
     if ok:
         status = DiagnosticStatus.PASS
     elif warn:

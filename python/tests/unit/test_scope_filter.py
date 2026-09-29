@@ -38,3 +38,18 @@ def test_filter_paths():
     )
     result = filter_paths(["A/1.md", "B/2.md"], scope)
     assert result == ["A/1.md"]
+
+
+def test_empty_scope_denies_all():
+    scope = AccessScope(id="empty", name="Empty", include=[], token="t")
+    assert not path_in_scope("note.md", scope)
+
+
+def test_segment_aware_globs():
+    scope = AccessScope(id="a", name="A", include=["Projects/A/**/*.md"], token="t")
+    assert path_in_scope("Projects/A/note.md", scope)
+    assert path_in_scope("Projects/A/deep/note.md", scope)
+    assert not path_in_scope("Projects/B/secret.md", scope)
+    scope.include = ["*.md"]
+    assert path_in_scope("note.md", scope)
+    assert not path_in_scope("deep/note.md", scope)

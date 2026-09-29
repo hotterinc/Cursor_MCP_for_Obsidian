@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from loguru import Logger
 
 from loguru import logger
 
@@ -36,5 +40,5 @@ def setup_logging(*, log_file: Path | None = None, level: str = "INFO") -> None:
     _configured = True
 
 
-def get_logger():
+def get_logger() -> Logger:
     return logger.bind(app=APP_NAME)

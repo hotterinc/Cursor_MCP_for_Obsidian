@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Union
+from typing import Any
 
 from obsidian_context_mcp.core.embeddings import create_embedding_provider
 from obsidian_context_mcp.core.project import ProjectContext
@@ -15,7 +15,7 @@ from obsidian_context_mcp.core.vector_store import create_vector_store, create_v
 from obsidian_context_mcp.core.work_context import WorkContext
 from obsidian_context_mcp.shared.types import SearchMode, SearchResult
 
-ContextLike = Union[ProjectContext, VaultContext, WorkContext]
+ContextLike = ProjectContext | VaultContext | WorkContext
 
 
 def _normalize_ctx(ctx: ContextLike) -> WorkContext:
@@ -56,10 +56,14 @@ class Retriever:
         mode: SearchMode = SearchMode.HYBRID,
         filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
-        semantic: list[dict] = []
-        lexical: list[dict] = []
+        semantic: list[dict[str, Any]] = []
+        lexical: list[dict[str, Any]] = []
 
-        fetch_k = top_k * 4 if self.work.scope else top_k * 2
+        if top_k <= 0 or (self.work.scope is not None and not self.work.scope.include):
+            return []
+        # Scope filtering must see the entire candidate population: unrelated
+        # highly ranked notes must not hide permitted notes below a fixed cap.
+        fetch_k = max(top_k, self.db.count_chunks()) if self.work.scope else top_k * 2
 
         if mode in (SearchMode.HYBRID, SearchMode.SEMANTIC):
             vector = self.embedder.embed_texts([query], is_query=True)[0]

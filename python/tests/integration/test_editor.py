@@ -100,3 +100,32 @@ def test_unified_diff_patch_updates_file(editor_ctx):
         {"diff": diff},
     )
     assert result.new_sha256 != note["sha256"]
+
+
+def test_overwrite_records_old_hash_and_backup(editor_ctx):
+    note = editor_ctx.read_note("Setup.md")
+    result = editor_ctx.create_note("Setup.md", "replacement", overwrite=True)
+    assert result.old_sha256 == note["sha256"]
+    assert result.backup_path is not None
+    assert Path(result.backup_path).read_bytes().decode("utf-8") == note["content"]
+
+
+def test_rename_backs_up_source(editor_ctx):
+    note = editor_ctx.read_note("Setup.md")
+    result = editor_ctx.rename_note("Setup.md", "Renamed.md", note["sha256"])
+    assert result.backup_path is not None
+    assert Path(result.backup_path).read_bytes().decode("utf-8") == note["content"]
+
+
+def test_concurrent_patches_require_fresh_hash(editor_ctx):
+    from concurrent.futures import ThreadPoolExecutor
+    note = editor_ctx.read_note("Setup.md")
+    def patch():
+        try:
+            editor_ctx.patch_note("Setup.md", note["sha256"], PatchMode.APPEND_SECTION,
+                                  {"heading": "## Concurrent", "content": "x"})
+            return "ok"
+        except HashMismatchError:
+            return "stale"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(lambda _: patch(), range(2))) == ["ok", "stale"]

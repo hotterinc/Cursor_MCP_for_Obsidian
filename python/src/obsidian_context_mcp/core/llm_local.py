@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 from loguru import logger
@@ -65,20 +67,19 @@ def download_gguf(
     completed = 0
     total = 0
 
-    with httpx.Client(follow_redirects=True, timeout=None) as client:
-        with client.stream("GET", url) as resp:
-            resp.raise_for_status()
-            cl = resp.headers.get("content-length")
-            if cl:
-                total = int(cl)
-            with tmp.open("wb") as f:
-                for chunk in resp.iter_bytes(1024 * 256):
-                    if not chunk:
-                        continue
-                    f.write(chunk)
-                    completed += len(chunk)
-                    if on_progress:
-                        on_progress(completed, total, "downloading")
+    with httpx.Client(follow_redirects=True, timeout=None) as client, client.stream("GET", url) as resp:
+        resp.raise_for_status()
+        cl = resp.headers.get("content-length")
+        if cl:
+            total = int(cl)
+        with tmp.open("wb") as f:
+            for chunk in resp.iter_bytes(1024 * 256):
+                if not chunk:
+                    continue
+                f.write(chunk)
+                completed += len(chunk)
+                if on_progress:
+                    on_progress(completed, total, "downloading")
 
     tmp.replace(dest)
 
@@ -95,10 +96,8 @@ def _load_llama(model_path: Path) -> Any:
         if _llama_instance is not None and _llama_path == path_str:
             return _llama_instance
         if _llama_instance is not None:
-            try:
+            with contextlib.suppress(Exception):
                 del _llama_instance
-            except Exception:
-                pass
             _llama_instance = None
 
         logger.info("Loading local LLM from {}", path_str)

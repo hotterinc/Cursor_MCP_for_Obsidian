@@ -21,16 +21,16 @@ def configure_stdio_utf8() -> None:
 
 class JsonRpcServer:
     def __init__(self) -> None:
-        self._handlers: dict[str, Callable[[dict], Any]] = {}
+        self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {}
         self._event_sink: Callable[[RpcEvent], None] | None = None
 
-    def register(self, method: str, handler: Callable[[dict], Any]) -> None:
+    def register(self, method: str, handler: Callable[[dict[str, Any]], Any]) -> None:
         self._handlers[method] = handler
 
     def set_event_sink(self, sink: Callable[[RpcEvent], None]) -> None:
         self._event_sink = sink
 
-    def emit_event(self, method: str, params: dict) -> None:
+    def emit_event(self, method: str, params: dict[str, Any]) -> None:
         event = RpcEvent(method=method, params=params)
         line = event.model_dump_json() + "\n"
         sys.stdout.buffer.write(line.encode("utf-8"))

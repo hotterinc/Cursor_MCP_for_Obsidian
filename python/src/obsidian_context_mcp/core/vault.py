@@ -21,15 +21,22 @@ class VaultValidationResult:
 
 
 def _matches_any(path: str, patterns: list[str]) -> bool:
-    norm = path.replace("\\", "/")
-    for pattern in patterns:
-        if fnmatch.fnmatch(norm, pattern):
-            return True
-        if fnmatch.fnmatch(norm, pattern.lstrip("**/")):
-            return True
-        if "**" in pattern and pattern.endswith("*.md") and norm.lower().endswith(".md"):
-            return True
-    return False
+    norm = path.replace("\\", "/").strip("/")
+    parts = norm.split("/")
+
+    def matches(pattern_parts: list[str], path_parts: list[str]) -> bool:
+        if not pattern_parts:
+            return not path_parts
+        head, *tail = pattern_parts
+        if head == "**":
+            return matches(tail, path_parts) or bool(
+                path_parts and matches(pattern_parts, path_parts[1:])
+            )
+        return bool(path_parts and fnmatch.fnmatchcase(path_parts[0], head)
+                    and matches(tail, path_parts[1:]))
+
+    return any(matches(pattern.replace("\\", "/").strip("/").split("/"), parts)
+               for pattern in patterns)
 
 
 def scan_markdown_files(
@@ -39,9 +46,14 @@ def scan_markdown_files(
     exclude: list[str],
     docs_subfolder: str | None = None,
 ) -> list[str]:
+    vault_root = vault_root.resolve()
     base = vault_root
     if docs_subfolder:
         base = vault_root / docs_subfolder
+    from obsidian_context_mcp.core.security import _is_inside_vault
+
+    if not _is_inside_vault(str(vault_root), str(base.resolve())):
+        return []
     if not base.exists():
         return []
 
@@ -67,7 +79,9 @@ def scan_markdown_files(
                 rel = rel[2:]
             if _matches_any(rel, exclude):
                 continue
-            if include and not _matches_any(rel, include):
+            if not _is_inside_vault(str(vault_root), str((vault_root / rel).resolve())):
+                continue
+            if not _matches_any(rel, include):
                 continue
             results.append(rel)
 
@@ -88,7 +102,7 @@ def validate_vault_path(
         raise VaultValidationError(f"Vault path is not a directory: {vault_path}")
 
     real = os.path.realpath(vault_path)
-    include = include or ["**/*.md"]
+    include = ["**/*.md"] if include is None else include
     exclude = exclude or [
         ".obsidian/**",
         ".git/**",

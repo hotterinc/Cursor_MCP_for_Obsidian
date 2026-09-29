@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Union
-
 from obsidian_context_mcp.core.project import ProjectContext
 from obsidian_context_mcp.core.retrieval import Retriever
 from obsidian_context_mcp.core.vault_context import VaultContext
 from obsidian_context_mcp.core.work_context import WorkContext
-from obsidian_context_mcp.shared.types import ContextPack, ContextSource, IndexStatus, SearchMode
+from obsidian_context_mcp.shared.types import (
+    ContextPack,
+    ContextSource,
+    IndexStatus,
+    SearchMode,
+    SearchResult,
+)
 
-ContextLike = Union[ProjectContext, VaultContext, WorkContext]
+ContextLike = ProjectContext | VaultContext | WorkContext
 
 
 def estimate_tokens(text: str) -> int:
@@ -76,7 +80,7 @@ def build_context_pack(
         "When editing documentation, cite relativePath and expectedSha256 from docs_read_note.\n"
     )
 
-    by_file: dict[str, list] = {}
+    by_file: dict[str, list[SearchResult]] = {}
     for r in results:
         by_file.setdefault(r.relative_path, []).append(r)
 

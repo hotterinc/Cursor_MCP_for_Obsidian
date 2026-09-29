@@ -5,9 +5,12 @@ from __future__ import annotations
 import contextlib
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import chromadb
+import numpy as np
+from chromadb.api.models.Collection import Collection
+from chromadb.api.types import Embeddings, Metadatas
 
 from obsidian_context_mcp.core.app_paths import get_project_chroma_path
 
@@ -50,7 +53,7 @@ class ChromaVectorStore(VectorStore):
     def __init__(self, persist_dir: str) -> None:
         self._client = chromadb.PersistentClient(path=persist_dir)
 
-    def _collection(self, project_id: str):
+    def _collection(self, project_id: str) -> Collection:
         return self._client.get_or_create_collection(
             name=f"project_{project_id[:16]}",
             metadata={"hnsw:space": "cosine"},
@@ -72,7 +75,7 @@ class ChromaVectorStore(VectorStore):
             clean_meta.append(
                 {k: (v if isinstance(v, (str, int, float, bool)) else str(v)) for k, v in m.items()}
             )
-        col.upsert(ids=chunk_ids, embeddings=vectors, metadatas=clean_meta)
+        col.upsert(ids=chunk_ids, embeddings=cast(Embeddings, [np.asarray(v, dtype=np.float32) for v in vectors]), metadatas=cast(Metadatas, clean_meta))
 
     def delete_chunks(self, project_id: str, chunk_ids: list[str]) -> None:
         if not chunk_ids:
@@ -92,19 +95,21 @@ class ChromaVectorStore(VectorStore):
         where = filters if filters else None
         try:
             results = col.query(
-                query_embeddings=[vector],
+                query_embeddings=cast(Embeddings, [np.asarray(vector, dtype=np.float32)]),
                 n_results=top_k,
                 where=where,
             )
         except Exception:
             return []
-        items = []
+        items: list[dict[str, Any]] = []
         if not results["ids"] or not results["ids"][0]:
             return items
+        distances = results.get("distances")
+        metadatas = results.get("metadatas")
         for i, cid in enumerate(results["ids"][0]):
-            dist = results["distances"][0][i] if results.get("distances") else 0
+            dist = distances[0][i] if distances else 0
             score = 1.0 - dist if dist is not None else 0.5
-            meta = results["metadatas"][0][i] if results.get("metadatas") else {}
+            meta = metadatas[0][i] if metadatas else {}
             items.append({"chunk_id": cid, "score": score, "metadata": meta or {}})
         return items
 

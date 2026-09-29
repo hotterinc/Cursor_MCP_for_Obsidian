@@ -73,3 +73,73 @@ def test_context_pack_includes_sources(configured_ctx, monkeypatch):
     Indexer(configured_ctx).run(IndexMode.FULL)
     pack = build_context_pack(configured_ctx, "API architecture")
     assert pack.project_id == configured_ctx.project_id
+
+
+def test_index_rejects_traversal_before_read(configured_ctx, tmp_path):
+    from obsidian_context_mcp.core.errors import PathSecurityError
+    outside = tmp_path / "outside.md"
+    outside.write_text("secret", encoding="utf-8")
+    indexer = Indexer(configured_ctx)
+    with pytest.raises(PathSecurityError):
+        indexer.index_file("../outside.md")
+    assert indexer.db.get_all_files() == []
+
+
+def test_failed_file_marks_job_failed(configured_ctx, monkeypatch):
+    indexer = Indexer(configured_ctx)
+    def fail(_):
+        raise RuntimeError("embedding unavailable")
+    monkeypatch.setattr(indexer, "_index_file_unlocked", fail)
+    progress = indexer.run(IndexMode.FULL)
+    assert progress.status.value == "failed"
+    assert progress.files_failed > 0
+
+
+def test_scoped_search_does_not_starve_visible_candidates(configured_ctx, monkeypatch):
+    from dataclasses import replace
+
+    from obsidian_context_mcp.core.work_context import WorkContext
+    from obsidian_context_mcp.shared.types import AccessScope, SearchMode
+    work = replace(WorkContext.from_project(configured_ctx), scope=AccessScope(
+        id="scope", name="Scope", include=["Architecture/**"], token="t"))
+    retriever = Retriever(work)
+    rows = [{"chunk_id": str(i), "score": i} for i in range(20)]
+    monkeypatch.setattr(retriever.db, "fts_search", lambda query, limit: rows[:limit])
+    monkeypatch.setattr(retriever.db, "get_chunk_with_file", lambda cid: {
+        "relative_path": "Architecture/API.md" if cid == "19" else "Hidden.md",
+        "start_line": 1, "end_line": 1, "text": "api"})
+    monkeypatch.setattr(retriever.db, "count_chunks", lambda: len(rows))
+    results = retriever.search("api", top_k=1, mode=SearchMode.LEXICAL)
+    assert [result.chunk_id for result in results] == ["19"]
+
+
+def test_incremental_rechecks_boundary_before_unchanged_skip(configured_ctx, tmp_path, monkeypatch):
+    import os
+    import subprocess
+    from dataclasses import replace
+
+    from obsidian_context_mcp.core.work_context import WorkContext
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("secret", encoding="utf-8")
+    link = vault / "link"
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                       check=True, capture_output=True)
+    else:
+        link.symlink_to(outside, target_is_directory=True)
+    work = replace(WorkContext.from_project(configured_ctx),
+                   vault_path=str(vault), vault_real_path=str(vault))
+    indexer = Indexer(work)
+    stat = (outside / "secret.md").stat()
+    monkeypatch.setattr(indexer.db, "get_all_files", lambda: [{
+        "relative_path": "link/secret.md", "mtime_ms": int(stat.st_mtime * 1000),
+        "size": stat.st_size, "id": "existing"}])
+    monkeypatch.setattr("obsidian_context_mcp.core.indexer.scan_markdown_files",
+                        lambda *args, **kwargs: ["link/secret.md"])
+    progress = indexer.run(IndexMode.INCREMENTAL)
+    assert progress.files_failed == 1
+    assert progress.files_skipped == 0
+    assert progress.status.value == "failed"

@@ -12,7 +12,7 @@ def path_in_scope(relative_path: str, scope: AccessScope) -> bool:
         return False
     if scope.include:
         return _matches_any(norm, scope.include)
-    return True
+    return False
 
 
 def filter_paths(paths: list[str], scope: AccessScope | None) -> list[str]:

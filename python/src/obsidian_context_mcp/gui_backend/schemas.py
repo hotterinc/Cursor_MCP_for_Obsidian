@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from obsidian_context_mcp.shared.types import SearchMode
@@ -11,20 +13,20 @@ class RpcRequest(BaseModel):
     jsonrpc: str = "2.0"
     id: str | int | None = None
     method: str
-    params: dict = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class RpcResponse(BaseModel):
     jsonrpc: str = "2.0"
     id: str | int | None = None
-    result: dict | None = None
-    error: dict | None = None
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 class RpcEvent(BaseModel):
     jsonrpc: str = "2.0"
     method: str
-    params: dict = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class _CamelModel(BaseModel):

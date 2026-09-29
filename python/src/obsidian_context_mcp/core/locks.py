@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
+import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
@@ -14,6 +17,18 @@ from obsidian_context_mcp.core.errors import LockError
 def _is_pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if sys.platform == "win32":
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            # Access denied means the process exists but cannot be queried.
+            return ctypes.get_last_error() == 5
+        kernel.CloseHandle(handle)
+        return True
     try:
         os.kill(pid, 0)
     except OSError:
@@ -29,9 +44,8 @@ def _try_clear_stale_lock(lock_path: Path) -> bool:
         raw = lock_path.read_text(encoding="utf-8").strip()
         pid = int(raw)
     except (ValueError, OSError):
-        with suppress(OSError):
-            lock_path.unlink(missing_ok=True)
-        return True
+        # A creator may still be writing its PID; do not steal an incomplete lock.
+        return False
     if not _is_pid_alive(pid):
         with suppress(OSError):
             lock_path.unlink(missing_ok=True)
@@ -101,7 +115,7 @@ class ProjectLock:
 
 
 @contextmanager
-def project_lock(project_id: str, name: str = "index", timeout: float = 30):
+def project_lock(project_id: str, name: str = "index", timeout: float = 30) -> Iterator[ProjectLock]:
     lock = ProjectLock(project_id, name, timeout=timeout)
     lock.acquire()
     try:

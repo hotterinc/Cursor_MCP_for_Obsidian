@@ -81,3 +81,16 @@ def test_symlink_escape_blocked(tmp_path):
     boundary = SecurityBoundary(config)
     with pytest.raises(PathSecurityError):
         boundary.resolve_read_path("escape.md")
+
+
+def test_read_only_scope_cannot_borrow_project_write_access(tmp_path):
+    from obsidian_context_mcp.core.errors import WriteAccessDeniedError
+    from obsidian_context_mcp.core.security import ScopeBoundary
+    from obsidian_context_mcp.shared.types import AccessScope, ProjectConfig
+    config = ProjectConfig(project_root=str(tmp_path), project_real_path=str(tmp_path),
+                           project_name="test", vault_path=str(tmp_path),
+                           vault_real_path=str(tmp_path), write_access=True)
+    boundary = ScopeBoundary(SecurityBoundary(config), AccessScope(
+        id="read", name="Read", include=["**/*.md"], token="t", write_access=False))
+    with pytest.raises(WriteAccessDeniedError):
+        boundary.resolve_write_path("note.md")

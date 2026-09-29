@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from obsidian_context_mcp.core.app_paths import get_app_data_dir
 from obsidian_context_mcp.core.diagnostics import run_diagnostics
 from obsidian_context_mcp.core.editor import Editor
@@ -24,10 +26,10 @@ from obsidian_context_mcp.gui_backend.schemas import (
     VaultSaveParams,
     VaultValidateParams,
 )
-from obsidian_context_mcp.shared.types import IndexMode
+from obsidian_context_mcp.shared.types import IndexMode, IndexProgress
 
 
-def _ctx(params: dict, *, require_configured: bool = False) -> ProjectContext:
+def _ctx(params: dict[str, Any], *, require_configured: bool = False) -> ProjectContext:
     root = params.get("project_root") or params.get("projectRoot")
     ctx = detect_project_context(cli_root=root)
     if ctx is None:
@@ -37,7 +39,7 @@ def _ctx(params: dict, *, require_configured: bool = False) -> ProjectContext:
     return ctx
 
 
-def handle_project_get_current(params: dict) -> dict:
+def handle_project_get_current(params: dict[str, Any]) -> dict[str, Any]:
     ctx = _ctx(params)
     config = ctx.config
     return {
@@ -52,7 +54,7 @@ def handle_project_get_current(params: dict) -> dict:
     }
 
 
-def handle_project_set_root(params: dict) -> dict:
+def handle_project_set_root(params: dict[str, Any]) -> dict[str, Any]:
     root = params.get("project_root") or params.get("projectRoot")
     if not root:
         raise ValueError("project_root required")
@@ -60,7 +62,7 @@ def handle_project_set_root(params: dict) -> dict:
     return handle_project_get_current({"project_root": ctx.project_root})
 
 
-def handle_vault_validate_path(params: dict) -> dict:
+def handle_vault_validate_path(params: dict[str, Any]) -> dict[str, Any]:
     p = VaultValidateParams.model_validate(params)
     result = validate_vault_path(p.vault_path)
     return {
@@ -74,7 +76,7 @@ def handle_vault_validate_path(params: dict) -> dict:
     }
 
 
-def handle_vault_save_config(params: dict) -> dict:
+def handle_vault_save_config(params: dict[str, Any]) -> dict[str, Any]:
     p = VaultSaveParams.model_validate(params)
     validation = validate_vault_path(
         p.vault_path,
@@ -94,7 +96,7 @@ def handle_vault_save_config(params: dict) -> dict:
     return {"ok": True, "config": config.model_dump()}
 
 
-def handle_index_status(params: dict) -> dict:
+def handle_index_status(params: dict[str, Any]) -> dict[str, Any]:
     ctx = _ctx(params)
     prog = IndexQueue.get().get_status()
     return {
@@ -103,12 +105,12 @@ def handle_index_status(params: dict) -> dict:
     }
 
 
-def handle_index_start(params: dict) -> dict:
+def handle_index_start(params: dict[str, Any]) -> dict[str, Any]:
     p = IndexStartParams.model_validate(params)
     ctx = _ctx(p.model_dump(), require_configured=True)
     mode = IndexMode.FULL if p.mode == "full" else IndexMode.INCREMENTAL
 
-    def _cb(progress):
+    def _cb(progress: IndexProgress) -> None:
         from obsidian_context_mcp.gui_backend.server import get_rpc_server
         srv = get_rpc_server()
         if srv:
@@ -118,13 +120,13 @@ def handle_index_start(params: dict) -> dict:
     return {"jobId": prog.job_id, "status": prog.status.value}
 
 
-def handle_index_cancel(params: dict) -> dict:
+def handle_index_cancel(params: dict[str, Any]) -> dict[str, Any]:
     job_id = params.get("job_id") or params.get("jobId", "")
     ok = IndexQueue.get().cancel(job_id)
     return {"ok": ok}
 
 
-def handle_search_docs(params: dict) -> dict:
+def handle_search_docs(params: dict[str, Any]) -> dict[str, Any]:
     p = SearchParams.model_validate(params)
     ctx = _ctx(p.model_dump(), require_configured=True)
     retriever = Retriever(ctx)
@@ -132,14 +134,14 @@ def handle_search_docs(params: dict) -> dict:
     return {"results": [r.model_dump() for r in results]}
 
 
-def handle_notes_read(params: dict) -> dict:
+def handle_notes_read(params: dict[str, Any]) -> dict[str, Any]:
     p = ReadNoteParams.model_validate(params)
     ctx = _ctx(p.model_dump(), require_configured=True)
     editor = Editor(ctx)
     return editor.read_note(p.relative_path)
 
 
-def handle_notes_list(params: dict) -> dict:
+def handle_notes_list(params: dict[str, Any]) -> dict[str, Any]:
     p = ListNotesParams.model_validate(params)
     ctx = _ctx(p.model_dump(), require_configured=True)
     db = SQLiteStore(ctx.config_store.config_path.parent / "db.sqlite")
@@ -148,13 +150,13 @@ def handle_notes_list(params: dict) -> dict:
     return {"notes": notes}
 
 
-def handle_diagnostics_run(params: dict) -> dict:
+def handle_diagnostics_run(params: dict[str, Any]) -> dict[str, Any]:
     ctx = _ctx(params)
     checks = run_diagnostics(ctx)
     return {"checks": [c.model_dump() for c in checks]}
 
 
-def handle_settings_get(params: dict) -> dict:
+def handle_settings_get(params: dict[str, Any]) -> dict[str, Any]:
     ctx = _ctx(params)
     config = ctx.config
     return {
@@ -171,7 +173,7 @@ def handle_settings_get(params: dict) -> dict:
     }
 
 
-def handle_settings_update(params: dict) -> dict:
+def handle_settings_update(params: dict[str, Any]) -> dict[str, Any]:
     p = SettingsUpdateParams.model_validate(params)
     ctx = _ctx(p.model_dump())
     config = ctx.config_store.create_or_update(
@@ -187,7 +189,7 @@ def handle_settings_update(params: dict) -> dict:
     return {"ok": True, "config": config.model_dump()}
 
 
-def handle_app_open_vault_path_request(params: dict) -> dict:
+def handle_app_open_vault_path_request(params: dict[str, Any]) -> dict[str, Any]:
     ctx = _ctx(params, require_configured=True)
     config = ctx.config_store.require_configured()
     return {
@@ -197,7 +199,7 @@ def handle_app_open_vault_path_request(params: dict) -> dict:
     }
 
 
-def handle_app_open_app_data_path_request(params: dict) -> dict:
+def handle_app_open_app_data_path_request(params: dict[str, Any]) -> dict[str, Any]:
     ctx = _ctx(params)
     from obsidian_context_mcp.core.app_paths import get_project_dir
     return {

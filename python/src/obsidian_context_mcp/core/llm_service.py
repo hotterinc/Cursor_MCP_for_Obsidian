@@ -195,27 +195,26 @@ class LlmPullManager:
     def _ollama_pull_worker(self, host: str, model: str) -> None:
         try:
             base = normalize_ollama_host(host)
-            with httpx.Client(timeout=None) as client:
-                with client.stream(
-                    "POST",
-                    f"{base}/api/pull",
-                    json={"name": model, "stream": True},
-                ) as resp:
-                    resp.raise_for_status()
-                    for line in resp.iter_lines():
-                        if not line:
-                            continue
-                        data = json.loads(line)
-                        with self._progress_lock:
-                            self._progress.status = str(data.get("status", ""))
-                            total = data.get("total")
-                            completed = data.get("completed")
-                            if isinstance(total, int):
-                                self._progress.total = total
-                            if isinstance(completed, int):
-                                self._progress.completed = completed
-                            if data.get("error"):
-                                self._progress.error = str(data["error"])
+            with httpx.Client(timeout=None) as client, client.stream(
+                "POST",
+                f"{base}/api/pull",
+                json={"name": model, "stream": True},
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    with self._progress_lock:
+                        self._progress.status = str(data.get("status", ""))
+                        total = data.get("total")
+                        completed = data.get("completed")
+                        if isinstance(total, int):
+                            self._progress.total = total
+                        if isinstance(completed, int):
+                            self._progress.completed = completed
+                        if data.get("error"):
+                            self._progress.error = str(data["error"])
         except Exception as exc:
             logger.exception("Ollama pull failed")
             with self._progress_lock:

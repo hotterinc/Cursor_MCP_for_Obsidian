@@ -6,7 +6,11 @@ import os
 import sys
 from pathlib import Path, PurePosixPath
 
-from obsidian_context_mcp.core.errors import PathSecurityError, ScopeAccessDeniedError, WriteAccessDeniedError
+from obsidian_context_mcp.core.errors import (
+    PathSecurityError,
+    ScopeAccessDeniedError,
+    WriteAccessDeniedError,
+)
 from obsidian_context_mcp.core.scope_filter import path_in_scope
 from obsidian_context_mcp.shared.constants import BLOCKED_WRITE_PREFIXES
 from obsidian_context_mcp.shared.types import AccessScope, ProjectConfig, ResolvedPath
@@ -15,7 +19,10 @@ from obsidian_context_mcp.shared.types import AccessScope, ProjectConfig, Resolv
 def _normalize_relative(relative_path: str) -> str:
     if "\x00" in relative_path:
         raise PathSecurityError("Path contains null bytes")
-    rel = relative_path.replace("\\", "/").lstrip("/")
+    rel = relative_path.replace("\\", "/")
+    if rel.startswith("/") or ":" in rel:
+        raise PathSecurityError("Absolute paths are not allowed")
+    rel = PurePosixPath(rel).as_posix()
     if ".." in PurePosixPath(rel).parts:
         raise PathSecurityError("Path traversal is not allowed")
     return rel
@@ -127,8 +134,10 @@ class ScopeBoundary:
         return resolved
 
     def assert_write_scope(self, relative_path: str) -> None:
-        if self._scope is None or not self._scope.write_access:
+        if self._scope is None:
             return
+        if not self._scope.write_access:
+            raise WriteAccessDeniedError("Write access is disabled for this scope")
         patterns = self._scope.write_include or self._scope.include
         if patterns and not path_in_scope(
             relative_path,

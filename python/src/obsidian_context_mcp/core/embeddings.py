@@ -7,6 +7,7 @@ import math
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
@@ -64,10 +65,10 @@ class SentenceTransformersEmbeddingProvider(EmbeddingProvider):
     def __init__(self, model_name: str, cache_dir: str) -> None:
         self._model_name = model_name
         self._cache_dir = cache_dir
-        self._model = None
+        self._model: Any = None
         self._encode_lock = threading.Lock()
 
-    def _load_model(self):
+    def _load_model(self) -> Any:
         if self._model is None:
             import torch
             from sentence_transformers import SentenceTransformer
@@ -108,7 +109,7 @@ class SentenceTransformersEmbeddingProvider(EmbeddingProvider):
             )
 
         if hasattr(vectors, "tolist") and getattr(vectors, "ndim", 0) == 2:
-            return vectors.tolist()
+            return [[float(value) for value in vector] for vector in vectors.tolist()]
         return [v.tolist() if hasattr(v, "tolist") else list(v) for v in vectors]
 
     def healthcheck(self) -> HealthResult:

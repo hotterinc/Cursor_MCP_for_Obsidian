@@ -8,6 +8,7 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from obsidian_context_mcp.core.app_paths import (
     compute_project_id,
@@ -26,7 +27,7 @@ from obsidian_context_mcp.shared.constants import (
 from obsidian_context_mcp.shared.types import ProjectConfig
 
 
-def _atomic_write_json(path: Path, data: dict) -> None:
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
@@ -41,23 +42,27 @@ def _atomic_write_json(path: Path, data: dict) -> None:
         raise
 
 
-def _load_json(path: Path) -> dict:
+def _load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     with path.open(encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("Configuration must be a JSON object")
+        return dict(data)
 
 
 class GlobalConfigStore:
-    def load(self) -> dict:
+    def load(self) -> dict[str, Any]:
         return _load_json(get_global_config_path())
 
-    def save(self, data: dict) -> None:
+    def save(self, data: dict[str, Any]) -> None:
         _atomic_write_json(get_global_config_path(), data)
 
     def get_last_active_project_root(self) -> str | None:
         cfg = self.load()
-        return cfg.get("lastActiveProjectRoot")
+        value = cfg.get("lastActiveProjectRoot")
+        return value if isinstance(value, str) else None
 
     def set_last_active_project_root(self, project_root: str) -> None:
         cfg = self.load()

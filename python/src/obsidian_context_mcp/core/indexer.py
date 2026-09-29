@@ -6,27 +6,27 @@ import os
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Union
 
 from loguru import logger
 
 from obsidian_context_mcp.core.chunker import chunk_note
-from obsidian_context_mcp.core.index_serial import INDEX_SERIAL_LOCK
 from obsidian_context_mcp.core.embeddings import create_embedding_provider
+from obsidian_context_mcp.core.index_serial import INDEX_SERIAL_LOCK
 from obsidian_context_mcp.core.locks import ProjectLock
 from obsidian_context_mcp.core.markdown_parser import parse_markdown_file
 from obsidian_context_mcp.core.project import ProjectContext, compute_file_id
+from obsidian_context_mcp.core.security import SecurityBoundary
 from obsidian_context_mcp.core.sqlite_store import SQLiteStore
 from obsidian_context_mcp.core.vault import scan_markdown_files
 from obsidian_context_mcp.core.vault_context import VaultContext
 from obsidian_context_mcp.core.vault_paths import get_vault_chroma_path
 from obsidian_context_mcp.core.vector_store import create_vector_store, create_vector_store_at
 from obsidian_context_mcp.core.work_context import WorkContext
-from obsidian_context_mcp.shared.types import IndexMode, IndexProgress, JobStatus
+from obsidian_context_mcp.shared.types import ChunkRecord, IndexMode, IndexProgress, JobStatus
 
 ProgressCallback = Callable[[IndexProgress], None]
 
-ContextLike = Union[ProjectContext, VaultContext, WorkContext]
+ContextLike = ProjectContext | VaultContext | WorkContext
 
 
 def _normalize_ctx(ctx: ContextLike) -> WorkContext:
@@ -40,6 +40,8 @@ def _normalize_ctx(ctx: ContextLike) -> WorkContext:
 class Indexer:
     def __init__(self, ctx: ContextLike) -> None:
         self.work = _normalize_ctx(ctx)
+        config = self.work.as_project_config().model_copy(update={"docs_subfolder": None})
+        self.boundary = SecurityBoundary(config)
         self.db = SQLiteStore(self.work.db_path)
         self.db.initialize()
         if isinstance(ctx, VaultContext):
@@ -66,8 +68,9 @@ class Indexer:
             self._index_file_unlocked(relative_path)
 
     def _index_file_unlocked(self, relative_path: str) -> None:
-        vault_root = Path(self.work.vault_real_path)
-        file_path = vault_root / relative_path
+        resolved = self.boundary.resolve_read_path(relative_path)
+        relative_path = resolved.relative_path
+        file_path = Path(resolved.real_path)
         file_id = compute_file_id(
             self.work.context_id,
             self.work.vault_real_path,
@@ -96,7 +99,7 @@ class Indexer:
         new_by_index = {c.chunk_index: c for c in new_chunks}
 
         reuse_ids: set[str] = set()
-        to_embed: list = []
+        to_embed: list[ChunkRecord] = []
         for chunk in new_chunks:
             old = old_by_index.get(chunk.chunk_index)
             if old and old["chunk_hash"] == chunk.chunk_hash and old["id"] == chunk.id:
@@ -133,7 +136,7 @@ class Indexer:
             return
 
         vectors: list[list[float]] = []
-        embed_chunks: list = []
+        embed_chunks: list[ChunkRecord] = []
         if to_embed:
             texts = [c.text for c in to_embed]
             logger.info("Embedding {} new/changed chunks for {}", len(texts), relative_path)
@@ -214,6 +217,8 @@ class Indexer:
 
                 file_path = vault_root / rel
                 try:
+                    resolved = self.boundary.resolve_read_path(rel)
+                    file_path = Path(resolved.real_path)
                     stat = file_path.stat()
                     mtime_ms = int(stat.st_mtime * 1000)
                     row = existing.get(rel)
@@ -223,9 +228,11 @@ class Indexer:
                             progress.files_skipped = stats["files_skipped"]
                             self._emit(progress_callback, progress)
                             continue
-                        if row.get("sha256"):
-                            note_path = vault_root / rel
-                            from obsidian_context_mcp.core.markdown_parser import parse_markdown_file
+                        if row["sha256"]:
+                            note_path = file_path
+                            from obsidian_context_mcp.core.markdown_parser import (
+                                parse_markdown_file,
+                            )
 
                             current = parse_markdown_file(note_path, rel)
                             if current.sha256 == row["sha256"]:
@@ -251,7 +258,7 @@ class Indexer:
                     self.vector_store.delete_chunks(self.work.context_id, chunk_ids)
                     self.db.mark_file_deleted(row["id"])
 
-        progress.status = JobStatus.COMPLETED
-        self.db.finish_index_job(job_id, JobStatus.COMPLETED, stats)
+        progress.status = JobStatus.FAILED if stats["files_failed"] else JobStatus.COMPLETED
+        self.db.finish_index_job(job_id, progress.status, stats)
         self._emit(progress_callback, progress)
         return progress

@@ -2,22 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
+from obsidian_context_mcp.core.app_paths import get_runtime_dir
 from obsidian_context_mcp.core.backups import create_backup
 from obsidian_context_mcp.core.errors import HashMismatchError, PatchError
+from obsidian_context_mcp.core.index_serial import INDEX_SERIAL_LOCK
 from obsidian_context_mcp.core.indexer import ContextLike, Indexer
+from obsidian_context_mcp.core.locks import PathLock
 from obsidian_context_mcp.core.markdown_parser import (
     compute_sha256,
     parse_markdown_text,
     read_file_text,
 )
-from obsidian_context_mcp.core.project import ProjectContext, compute_file_id
+from obsidian_context_mcp.core.project import compute_file_id
 from obsidian_context_mcp.core.security import ScopeBoundary, SecurityBoundary
 from obsidian_context_mcp.core.sqlite_store import SQLiteStore
 from obsidian_context_mcp.core.vault_context import VaultContext
@@ -32,6 +39,19 @@ class EditResult:
     new_sha256: str
     backup_path: str | None
     dry_run: bool
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _serialized_mutation(func: Callable[Concatenate[Editor, _P], _R]) -> Callable[Concatenate[Editor, _P], _R]:
+    @wraps(func)
+    def wrapped(self: Editor, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        key = hashlib.sha256(os.path.normcase(self.work.vault_real_path).encode()).hexdigest()
+        with INDEX_SERIAL_LOCK, PathLock(get_runtime_dir() / f"edit-{key}.lock", timeout=30):
+            return func(self, *args, **kwargs)
+    return cast(Callable[Concatenate["Editor", _P], _R], wrapped)
 
 
 class Editor:
@@ -76,8 +96,8 @@ class Editor:
 
     def _apply_patch(self, text: str, mode: PatchMode, patch: dict[str, Any]) -> str:
         if mode == PatchMode.REPLACE_EXACT:
-            old = patch["oldText"]
-            new = patch["newText"]
+            old = str(patch["oldText"])
+            new = str(patch["newText"])
             idx = patch.get("occurrenceIndex")
             count = text.count(old)
             if count == 0:
@@ -96,15 +116,16 @@ class Editor:
             return self._apply_unified_diff(text, diff)
 
         if mode == PatchMode.APPEND_SECTION:
-            heading = patch["heading"]
-            content = patch["content"]
+            heading = str(patch["heading"])
+            content = str(patch["content"])
             sep = "\n\n" if not text.endswith("\n") else "\n"
             return text.rstrip() + sep + heading + "\n\n" + content + "\n"
 
         if mode == PatchMode.UPSERT_SECTION:
-            heading = patch["heading"]
-            content = patch["content"]
-            level = len(re.match(r"^(#+)", heading).group(1)) if re.match(r"^(#+)", heading) else 2
+            heading = str(patch["heading"])
+            content = str(patch["content"])
+            match = re.match(r"^(#+)", heading)
+            level = len(match.group(1)) if match else 2
             pattern = re.compile(
                 rf"^{re.escape(heading)}\s*$.*?(?=^#{{{1,{level}}}}\s|\Z)",
                 re.MULTILINE | re.DOTALL,
@@ -185,6 +206,7 @@ class Editor:
         output.extend(original_lines[src_pos:])
         return "".join(output)
 
+    @_serialized_mutation
     def patch_note(
         self,
         relative_path: str,
@@ -235,6 +257,7 @@ class Editor:
         )
         return EditResult(relative_path, expected_sha256, new_hash, backup_path, False)
 
+    @_serialized_mutation
     def create_note(
         self,
         relative_path: str,
@@ -247,13 +270,25 @@ class Editor:
         path = Path(resolved.real_path)
         if path.exists() and not overwrite:
             raise PatchError("File already exists")
+        old_hash = ""
+        backup_path = None
+        if path.exists():
+            old_text, _ = read_file_text(path)
+            old_hash = compute_sha256(old_text)
+            if create_backup_flag and self.config.backup_before_edit:
+                backup_path = str(create_backup(
+                    self.work.context_id, relative_path=resolved.relative_path,
+                    source_path=path, operation="overwrite", old_sha256=old_hash,
+                    new_sha256=compute_sha256(content), backups_dir=self.work.backups_dir,
+                ))
         path.parent.mkdir(parents=True, exist_ok=True)
         eol = detect_eol(content)
         new_hash = compute_sha256(content)
         self._atomic_write(path, content, eol)
         Indexer(self._ctx).index_file(resolved.relative_path)
-        return EditResult(resolved.relative_path, "", new_hash, None, False)
+        return EditResult(resolved.relative_path, old_hash, new_hash, backup_path, False)
 
+    @_serialized_mutation
     def delete_note(
         self,
         relative_path: str,
@@ -278,6 +313,7 @@ class Editor:
         Indexer(self._ctx).index_file(relative_path)
         return EditResult(relative_path, expected_sha256, "", backup_path, False)
 
+    @_serialized_mutation
     def rename_note(
         self,
         from_relative_path: str,
@@ -296,21 +332,33 @@ class Editor:
             raise HashMismatchError("Hash mismatch", details={"expected": expected_sha256, "actual": current_hash})
         if to_path.exists():
             raise PatchError("Target path already exists")
+        backup_path = None
+        if create_backup_flag and self.config.backup_before_edit:
+            backup_path = str(create_backup(
+                self.work.context_id, relative_path=from_resolved.relative_path,
+                source_path=from_path, operation="rename", old_sha256=current_hash,
+                new_sha256=current_hash, backups_dir=self.work.backups_dir,
+            ))
         to_path.parent.mkdir(parents=True, exist_ok=True)
         from_path.rename(to_path)
         Indexer(self._ctx).index_file(from_relative_path)
         Indexer(self._ctx).index_file(to_resolved.relative_path)
-        return EditResult(to_resolved.relative_path, expected_sha256, current_hash, None, False)
+        return EditResult(to_resolved.relative_path, expected_sha256, current_hash, backup_path, False)
 
     @staticmethod
     def _atomic_write(path: Path, content: str, eol: str) -> None:
         normalized = content.replace("\r\n", "\n").replace("\n", eol)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8", newline="") as f:
-            f.write(normalized)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
+        fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        tmp = Path(name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+                f.write(normalized)
+                f.flush()
+                os.fsync(f.fileno())
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)
+
 
 
 def detect_eol(text: str) -> str:

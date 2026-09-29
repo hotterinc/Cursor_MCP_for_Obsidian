@@ -122,7 +122,7 @@ class SQLiteStore:
         mtime_ms: int,
         sha256: str,
         title: str,
-        frontmatter: dict,
+        frontmatter: dict[str, Any],
         tags: list[str],
         links: list[str],
     ) -> None:
@@ -171,7 +171,7 @@ class SQLiteStore:
             "SELECT * FROM files WHERE relative_path = ? AND deleted_at IS NULL",
             (relative_path,),
         ).fetchone()
-        return row
+        return row if isinstance(row, sqlite3.Row) else None
 
     def get_all_files(self) -> list[sqlite3.Row]:
         return list(
@@ -249,6 +249,10 @@ class SQLiteStore:
         )
         self.conn.commit()
 
+    def count_chunks(self) -> int:
+        row = self.conn.execute("SELECT COUNT(*) FROM chunks").fetchone()
+        return int(row[0])
+
     def fts_search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         try:
             rows = self.conn.execute(
@@ -284,7 +288,7 @@ class SQLiteStore:
         )
         self.conn.commit()
 
-    def finish_index_job(self, job_id: str, status: JobStatus, stats: dict, error: str | None = None) -> None:
+    def finish_index_job(self, job_id: str, status: JobStatus, stats: dict[str, Any], error: str | None = None) -> None:
         now = datetime.utcnow().isoformat() + "Z"
         self.conn.execute(
             "UPDATE index_jobs SET status=?, finished_at=?, stats_json=?, error=? WHERE id=?",

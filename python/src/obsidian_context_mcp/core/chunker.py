@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from obsidian_context_mcp.core.project import compute_chunk_id, compute_file_id
 from obsidian_context_mcp.shared.constants import (
@@ -25,7 +26,7 @@ def normalize_chunk_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
-def compute_chunk_hash(text: str, metadata: dict) -> str:
+def compute_chunk_hash(text: str, metadata: dict[str, Any]) -> str:
     key = normalize_chunk_text(text) + "|" + str(sorted(metadata.items()))
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 

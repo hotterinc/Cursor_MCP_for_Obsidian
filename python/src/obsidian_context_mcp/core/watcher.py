@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Union
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.api import BaseObserver
 
 from obsidian_context_mcp.core.indexer import Indexer
 from obsidian_context_mcp.core.project import ProjectContext
 from obsidian_context_mcp.core.vault_context import VaultContext
 from obsidian_context_mcp.shared.constants import WATCHER_DEBOUNCE_MS_DEFAULT
 
-ContextLike = Union[ProjectContext, VaultContext]
+ContextLike = ProjectContext | VaultContext
 
 
 class VaultWatcherHandler(FileSystemEventHandler):
@@ -43,7 +44,7 @@ class VaultWatcherHandler(FileSystemEventHandler):
         if isinstance(self.ctx, VaultContext):
             return self.ctx.vault_real_path
         config = self.ctx.config
-        return config.vault_real_path if config else ""
+        return (config.vault_real_path or "") if config else ""
 
     def _schedule(self, rel: str, event_type: str) -> None:
         with self._lock:
@@ -64,10 +65,10 @@ class VaultWatcherHandler(FileSystemEventHandler):
             self._pending[rel] = timer
             timer.start()
 
-    def _rel_path(self, src_path: str) -> str | None:
+    def _rel_path(self, src_path: str | bytes) -> str | None:
         vault = Path(self._vault_real_path())
         try:
-            rel = Path(src_path).resolve().relative_to(vault.resolve())
+            rel = Path(os.fsdecode(src_path)).resolve().relative_to(vault.resolve())
         except ValueError:
             return None
         rel_str = rel.as_posix()
@@ -115,7 +116,7 @@ class VaultWatcher:
 
     def __init__(self, ctx: ContextLike) -> None:
         self.ctx = ctx
-        self._observer: Observer | None = None
+        self._observer: BaseObserver | None = None
         self._handler: VaultWatcherHandler | None = None
 
     @classmethod
