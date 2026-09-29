@@ -113,6 +113,26 @@ def test_scoped_search_does_not_starve_visible_candidates(configured_ctx, monkey
     assert [result.chunk_id for result in results] == ["19"]
 
 
+def test_search_score_never_goes_below_zero(configured_ctx, monkeypatch):
+    from obsidian_context_mcp.shared.types import SearchMode
+
+    retriever = Retriever(configured_ctx)
+    monkeypatch.setattr(retriever.embedder, "embed_texts", lambda texts, is_query: [[0.0]])
+    monkeypatch.setattr(
+        retriever.vector_store,
+        "search",
+        lambda project_id, vector, top_k, filters: [{"chunk_id": "low", "score": -0.2}],
+    )
+    monkeypatch.setattr(retriever.db, "get_chunk_with_file", lambda cid: {
+        "relative_path": "Note.md", "file_title": "Note", "start_line": 1,
+        "end_line": 1, "text": "different text", "heading_path_json": "[]",
+        "tags_json": "[]", "links_json": "[]",
+    })
+
+    results = retriever.search("unrelated", mode=SearchMode.SEMANTIC)
+    assert results[0].score == 0.0
+
+
 def test_incremental_rechecks_boundary_before_unchanged_skip(configured_ctx, tmp_path, monkeypatch):
     import os
     import subprocess

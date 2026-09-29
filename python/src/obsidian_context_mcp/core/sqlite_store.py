@@ -103,12 +103,41 @@ class SQLiteStore:
                 text,
                 title,
                 heading_path,
-                tags,
-                content='',
-                contentless_delete=1
+                tags
             );
             """
         )
+        fts_schema = c.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'fts_chunks'"
+        ).fetchone()["sql"]
+        if "content=''" in fts_schema.lower():
+            # Contentless FTS returns NULL for chunk_id, so lexical hits cannot
+            # be joined to chunks. Rebuild from the canonical metadata tables.
+            with c:
+                c.execute("DROP TABLE fts_chunks")
+                c.execute(
+                    "CREATE VIRTUAL TABLE fts_chunks USING fts5("
+                    "chunk_id UNINDEXED, text, title, heading_path, tags)"
+                )
+                rows = c.execute(
+                    "SELECT c.id, c.text, c.heading_path_json, f.title, f.tags_json "
+                    "FROM chunks c JOIN files f ON c.file_id = f.id "
+                    "WHERE f.deleted_at IS NULL"
+                ).fetchall()
+                c.executemany(
+                    "INSERT INTO fts_chunks (chunk_id, text, title, heading_path, tags) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [
+                        (
+                            row["id"],
+                            row["text"],
+                            row["title"] or "",
+                            " > ".join(json.loads(row["heading_path_json"] or "[]")),
+                            " ".join(json.loads(row["tags_json"] or "[]")),
+                        )
+                        for row in rows
+                    ],
+                )
         c.commit()
 
     def upsert_file(

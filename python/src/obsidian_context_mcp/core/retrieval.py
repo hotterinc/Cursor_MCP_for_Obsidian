@@ -109,7 +109,7 @@ class Retriever:
                     heading_path=heading_path,
                     start_line=row["start_line"],
                     end_line=row["end_line"],
-                    score=min(score, 1.0),
+                    score=max(0.0, min(score, 1.0)),
                     text=row["text"],
                     tags=tags,
                     links=links,
