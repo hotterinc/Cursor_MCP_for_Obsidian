@@ -74,7 +74,7 @@ url = "http://127.0.0.1:18432/mcp"
 bearer_token_env_var = "OBSIDIAN_CONTEXT_SCOPE_TOKEN"
 ```
 
-Cursor continues using `/sse`; Codex uses Streamable HTTP `/mcp`. Both enforce the same scope token. ChatGPT web access is not configured here: the server binds to local HTTP and does not expose an HTTPS endpoint.
+Cursor continues using `/sse`; Codex uses Streamable HTTP `/mcp`. Both enforce the same scope token. On upgrading from an older plugin, restart Obsidian to replace the server and create its local admin capability; if an old process cannot be verified as belonging to this vault, stop it manually before restarting. ChatGPT web access is not configured here: the server binds to local HTTP and does not expose an HTTPS endpoint.
 
 ## Access Scopes
 
