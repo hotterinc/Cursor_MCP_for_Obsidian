@@ -165,7 +165,7 @@ export class ScopesModal extends Modal {
 
     const codexSetting = new Setting(block)
       .setName("Codex MCP")
-      .setDesc("ChatGPT → Codex → Local: вставьте TOML в config.toml, задайте токен в переменных среды и перезапустите ChatGPT. Проверка: /mcp.")
+      .setDesc("Вставьте TOML в config.toml, задайте токен в переменных среды и перезапустите ChatGPT. Проверка: /mcp.")
       .addButton(btn => btn.setButtonText("Copy Codex config").onClick(async () => {
         try {
           await this.flushScope(scope.id);

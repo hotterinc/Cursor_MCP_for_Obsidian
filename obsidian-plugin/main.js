@@ -1334,7 +1334,7 @@ var ScopesModal = class extends import_obsidian7.Modal {
     });
     updatePreview();
     new import_obsidian7.Setting(block).setName("Scope ID").setDesc(scope.id).addText((t) => t.setValue(scope.id).setDisabled(true));
-    const codexSetting = new import_obsidian7.Setting(block).setName("Codex MCP").setDesc("ChatGPT \u2192 Codex \u2192 Local: \u0432\u0441\u0442\u0430\u0432\u044C\u0442\u0435 TOML \u0432 config.toml, \u0437\u0430\u0434\u0430\u0439\u0442\u0435 \u0442\u043E\u043A\u0435\u043D \u0432 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u0441\u0440\u0435\u0434\u044B \u0438 \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 ChatGPT. \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430: /mcp.").addButton((btn) => btn.setButtonText("Copy Codex config").onClick(async () => {
+    const codexSetting = new import_obsidian7.Setting(block).setName("Codex MCP").setDesc("\u0412\u0441\u0442\u0430\u0432\u044C\u0442\u0435 TOML \u0432 config.toml, \u0437\u0430\u0434\u0430\u0439\u0442\u0435 \u0442\u043E\u043A\u0435\u043D \u0432 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u0441\u0440\u0435\u0434\u044B \u0438 \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 ChatGPT. \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430: /mcp.").addButton((btn) => btn.setButtonText("Copy Codex config").onClick(async () => {
       try {
         await this.flushScope(scope.id);
         const res = await this.client.codexConfig(scope.id);
