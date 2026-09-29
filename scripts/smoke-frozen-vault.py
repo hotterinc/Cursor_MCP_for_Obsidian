@@ -31,8 +31,9 @@ def main(binary: Path) -> None:
         env.update(HF_HUB_OFFLINE="1", ANONYMIZED_TELEMETRY="False", OBSIDIAN_CONTEXT_DATA_DIR=str(data))
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         process = subprocess.Popen(
-            [str(binary), "vault-server", "--vault-path", str(vault), "--data-dir", str(data)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, creationflags=flags,
+            [str(binary), "vault-server", "--vault-path", str(vault),
+             "--data-dir", str(data), "--port", "0"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env, creationflags=flags,
         )
         runtime: dict[str, Any] | None = None
         try:
@@ -40,7 +41,8 @@ def main(binary: Path) -> None:
             with httpx.Client(timeout=5) as client:
                 while time.monotonic() < deadline:
                     if process.poll() is not None:
-                        raise RuntimeError(f"Frozen sidecar exited early: {process.returncode}")
+                        error = process.stderr.read().decode(errors="replace")[-4000:] if process.stderr else ""
+                        raise RuntimeError(f"Frozen sidecar exited early: {process.returncode}\n{error}")
                     path = data / "runtime.json"
                     if path.exists():
                         try:
