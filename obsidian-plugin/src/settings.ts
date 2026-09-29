@@ -52,7 +52,7 @@ export class ObsidianContextSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("MCP server port")
       .setDesc(
-        "Фиксированный порт для Cursor MCP (по умолчанию 18432). 0 = случайный порт при каждом запуске — тогда после рестарта нужно обновлять .cursor/mcp.json. После смены порта нажмите Restart server."
+        "Фиксированный порт для Cursor и локального Codex (по умолчанию 18432). 0 = случайный порт при каждом запуске — после рестарта обновите конфигурацию клиента. После смены порта нажмите Restart server."
       )
       .addText((text) =>
         text
@@ -72,7 +72,7 @@ export class ObsidianContextSettingTab extends PluginSettingTab {
     if (runtimePort !== null) {
       new Setting(containerEl)
         .setName("Current server URL")
-        .setDesc(`http://127.0.0.1:${runtimePort}/sse — используйте этот порт в Cursor MCP config`);
+        .setDesc(`Cursor: http://127.0.0.1:${runtimePort}/sse. Для Codex скопируйте готовый конфиг в Access scopes.`);
     }
 
     new Setting(containerEl)
@@ -101,7 +101,7 @@ export class ObsidianContextSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Stop server on quit")
       .setDesc(
-        "Остановить vault-server при закрытии Obsidian. Выключено — сервер остаётся для Cursor MCP в фоне."
+        "Остановить vault-server при закрытии Obsidian. Выключено — сервер остаётся для MCP-клиентов в фоне."
       )
       .addToggle((t) =>
         t.setValue(this.plugin.settings.stopServerOnQuit).onChange(async (v) => {
@@ -130,7 +130,7 @@ export class ObsidianContextSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Access scopes")
-      .setDesc("Manage Cursor access to specific vault folders")
+      .setDesc("Доступ Cursor и локального Codex к папкам vault")
       .addButton((btn) => {
         btn.setButtonText("Open scopes").onClick(() => {
           void this.runAction(btn, "Open scopes", () => this.plugin.openScopesModal());

@@ -1,4 +1,6 @@
 import { App, Modal, Notice, Setting } from "obsidian";
+import { platform } from "os";
+import { openCodexConfig, openEnvironmentVariables } from "./CodexSetupActions";
 import { listVaultFolderNodes } from "../folderScope";
 import type { SidecarClient } from "../sidecar/client";
 import type { AccessScope } from "../types";
@@ -24,7 +26,7 @@ export class ScopesModal extends Modal {
     contentEl.addClass("ocm-scopes-modal-content");
     contentEl.createEl("h2", { text: "Доступ MCP к vault" });
     contentEl.createEl("p", {
-      text: "Выберите папки для чтения и записи. Скопируйте JSON для Cursor или TOML для Codex. Токен Codex задаётся отдельно через переменную окружения.",
+      text: "Выберите папки для чтения и записи. Для Cursor скопируйте JSON, для локального Codex в приложении ChatGPT — TOML. Токен Codex задаётся через переменную окружения.",
     });
 
     this.markdownPaths = this.app.vault
@@ -36,7 +38,7 @@ export class ScopesModal extends Modal {
 
     new Setting(contentEl)
       .setName("Новый scope")
-      .setDesc("Отдельный токен для Cursor с выбранными папками")
+      .setDesc("Отдельный токен для Cursor и локального Codex с выбранными папками")
       .addButton((btn) =>
         btn.setButtonText("Добавить scope").setCta().onClick(() => {
           void this.addScope(btn);
@@ -124,11 +126,11 @@ export class ScopesModal extends Modal {
       }).catch(() => {});
       previewEl.setText(
         fields.include.length
-          ? `Cursor увидит ~${count} заметок` +
+          ? `MCP увидит ~${count} заметок` +
               (fields.writeAccess
                 ? `, запись в ${writeFolders} ${writeFolders === 1 ? "папке" : "папках"}`
                 : ", только чтение")
-          : "Не выбрано ни одной папки — Cursor ничего не увидит"
+          : "Не выбрано ни одной папки — MCP не получит доступ к заметкам"
       );
     };
 
@@ -180,6 +182,23 @@ export class ScopesModal extends Modal {
         } catch(e) { new Notice(String(e)); }
       }));
 
+    const setupSetting = new Setting(block)
+      .setName("Настройка ChatGPT → Codex")
+      .setDesc("Вставьте скопированный TOML в config.toml, задайте токен в переменных пользователя и полностью перезапустите ChatGPT. Для проверки выберите Codex → Local и введите /mcp.")
+      .addButton(btn => btn.setButtonText("Открыть config.toml").onClick(async () => {
+        try {
+          const error = await openCodexConfig();
+          if (error) new Notice(`Не удалось открыть конфигурацию: ${error}`);
+        } catch (e) { new Notice(`Не удалось открыть конфигурацию: ${e}`); }
+      }));
+    if (platform() === "win32") {
+      setupSetting.addButton(btn => btn.setButtonText("Переменные среды").onClick(() => {
+        try {
+          openEnvironmentVariables(error => new Notice(`Не удалось открыть переменные среды: ${error}`));
+        } catch (e) { new Notice(`Не удалось открыть переменные среды: ${e}`); }
+      }));
+    }
+
     new Setting(block)
       .setName("Cursor MCP")
       .addButton((btn) =>
@@ -200,7 +219,7 @@ export class ScopesModal extends Modal {
           await this.client.regenerateToken(scope.id);
           await this.reload();
           this.renderList();
-          new Notice("Токен обновлён — обновите конфиг в Cursor");
+          new Notice("Токен обновлён — обновите конфиг Cursor и переменную Codex");
         })
       )
       .addButton((btn) =>

@@ -94,6 +94,8 @@ cat > "$STAGE/INSTALL.md" <<EOF
 3. Obsidian → Settings → Community plugins → включите **Obsidian Context MCP**.
 4. Settings плагина → **Access scopes** → создайте scope → **Copy Cursor JSON** → вставьте в Cursor \`.cursor/mcp.json\`.
 
+Для ChatGPT desktop → Codex → Local используйте **Copy Codex config** и **Copy scope token**. Задайте \`OBSIDIAN_CONTEXT_SCOPE_TOKEN\` в окружении локального Codex, перезапустите ChatGPT и проверьте подключение через \`/mcp\`.
+
 ${PLATFORM_NOTE}
 
 Папка \`data/\` (индекс, scopes, логи) создаётся автоматически при первом запуске — в архиве её нет намеренно.

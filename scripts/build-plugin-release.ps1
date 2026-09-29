@@ -54,7 +54,7 @@ $install = @"
 3. Obsidian -> Settings -> Community plugins -> enable **Obsidian Context MCP**.
 4. Plugin settings -> **Access scopes** -> create scope -> **Copy Cursor JSON** -> paste into Cursor `.cursor/mcp.json`.
 
-For local Codex MCP, use **Copy Codex config** and **Copy scope token**. Set `OBSIDIAN_CONTEXT_SCOPE_TOKEN` in the Codex environment.
+For ChatGPT desktop -> Codex -> Local, use **Copy Codex config** and **Copy scope token**. Set `OBSIDIAN_CONTEXT_SCOPE_TOKEN` as a user environment variable, restart ChatGPT, then type `/mcp` to verify the connection. The Access scopes dialog can open config.toml and Windows Environment Variables.
 
 Windows first run: if SmartScreen blocks `obsidian-context-mcp.exe`, choose More info -> Run anyway.
 The `data/` folder (index, scopes, logs) is created on first run and is not included in the zip.

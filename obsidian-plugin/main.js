@@ -914,7 +914,7 @@ var ObsidianContextSettingTab = class extends import_obsidian6.PluginSettingTab 
       );
     }
     new import_obsidian6.Setting(containerEl).setName("MCP server port").setDesc(
-      "\u0424\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u0434\u043B\u044F Cursor MCP (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E 18432). 0 = \u0441\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u043F\u0440\u0438 \u043A\u0430\u0436\u0434\u043E\u043C \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u2014 \u0442\u043E\u0433\u0434\u0430 \u043F\u043E\u0441\u043B\u0435 \u0440\u0435\u0441\u0442\u0430\u0440\u0442\u0430 \u043D\u0443\u0436\u043D\u043E \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C .cursor/mcp.json. \u041F\u043E\u0441\u043B\u0435 \u0441\u043C\u0435\u043D\u044B \u043F\u043E\u0440\u0442\u0430 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 Restart server."
+      "\u0424\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u0434\u043B\u044F Cursor \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0433\u043E Codex (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E 18432). 0 = \u0441\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u043F\u0440\u0438 \u043A\u0430\u0436\u0434\u043E\u043C \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u2014 \u043F\u043E\u0441\u043B\u0435 \u0440\u0435\u0441\u0442\u0430\u0440\u0442\u0430 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E \u043A\u043B\u0438\u0435\u043D\u0442\u0430. \u041F\u043E\u0441\u043B\u0435 \u0441\u043C\u0435\u043D\u044B \u043F\u043E\u0440\u0442\u0430 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 Restart server."
     ).addText(
       (text) => text.setPlaceholder("18432").setValue(String(this.plugin.settings.serverPort)).onChange(async (v) => {
         const n = Number.parseInt(v.trim(), 10);
@@ -924,7 +924,7 @@ var ObsidianContextSettingTab = class extends import_obsidian6.PluginSettingTab 
     );
     const runtimePort = this.plugin.getRuntimePort();
     if (runtimePort !== null) {
-      new import_obsidian6.Setting(containerEl).setName("Current server URL").setDesc(`http://127.0.0.1:${runtimePort}/sse \u2014 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439\u0442\u0435 \u044D\u0442\u043E\u0442 \u043F\u043E\u0440\u0442 \u0432 Cursor MCP config`);
+      new import_obsidian6.Setting(containerEl).setName("Current server URL").setDesc(`Cursor: http://127.0.0.1:${runtimePort}/sse. \u0414\u043B\u044F Codex \u0441\u043A\u043E\u043F\u0438\u0440\u0443\u0439\u0442\u0435 \u0433\u043E\u0442\u043E\u0432\u044B\u0439 \u043A\u043E\u043D\u0444\u0438\u0433 \u0432 Access scopes.`);
     }
     new import_obsidian6.Setting(containerEl).setName("Auto-start sidecar").setDesc("Start vault-server when Obsidian loads the vault").addToggle(
       (t) => t.setValue(this.plugin.settings.autoStart).onChange(async (v) => {
@@ -942,7 +942,7 @@ var ObsidianContextSettingTab = class extends import_obsidian6.PluginSettingTab 
       })
     );
     new import_obsidian6.Setting(containerEl).setName("Stop server on quit").setDesc(
-      "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C vault-server \u043F\u0440\u0438 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u0438 Obsidian. \u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u0434\u043B\u044F Cursor MCP \u0432 \u0444\u043E\u043D\u0435."
+      "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C vault-server \u043F\u0440\u0438 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u0438 Obsidian. \u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u0434\u043B\u044F MCP-\u043A\u043B\u0438\u0435\u043D\u0442\u043E\u0432 \u0432 \u0444\u043E\u043D\u0435."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.stopServerOnQuit).onChange(async (v) => {
         this.plugin.settings.stopServerOnQuit = v;
@@ -959,7 +959,7 @@ var ObsidianContextSettingTab = class extends import_obsidian6.PluginSettingTab 
         void this.runAction(btn, "Restart", () => this.plugin.restartSidecarIfNeeded());
       });
     });
-    new import_obsidian6.Setting(containerEl).setName("Access scopes").setDesc("Manage Cursor access to specific vault folders").addButton((btn) => {
+    new import_obsidian6.Setting(containerEl).setName("Access scopes").setDesc("\u0414\u043E\u0441\u0442\u0443\u043F Cursor \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0433\u043E Codex \u043A \u043F\u0430\u043F\u043A\u0430\u043C vault").addButton((btn) => {
       btn.setButtonText("Open scopes").onClick(() => {
         void this.runAction(btn, "Open scopes", () => this.plugin.openScopesModal());
       });
@@ -984,6 +984,29 @@ var ObsidianContextSettingTab = class extends import_obsidian6.PluginSettingTab 
 
 // src/views/ScopesModal.ts
 var import_obsidian7 = require("obsidian");
+var import_os2 = require("os");
+
+// src/views/CodexSetupActions.ts
+var import_child_process2 = require("child_process");
+var import_fs = require("fs");
+var import_os = require("os");
+var import_path = require("path");
+var { shell } = require("electron");
+async function openCodexConfig() {
+  const directory = (0, import_path.join)((0, import_os.homedir)(), ".codex");
+  const config = (0, import_path.join)(directory, "config.toml");
+  return shell.openPath((0, import_fs.existsSync)(config) ? config : directory);
+}
+function openEnvironmentVariables(onError) {
+  if ((0, import_os.platform)() !== "win32") throw new Error("Available only on Windows");
+  const child = (0, import_child_process2.spawn)("rundll32.exe", ["sysdm.cpl,EditEnvironmentVariables"], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false
+  });
+  child.on("error", onError);
+  child.unref();
+}
 
 // src/folderScope.ts
 var ALL_VAULT_PATH = "*";
@@ -1209,11 +1232,11 @@ var ScopesModal = class extends import_obsidian7.Modal {
     contentEl.addClass("ocm-scopes-modal-content");
     contentEl.createEl("h2", { text: "\u0414\u043E\u0441\u0442\u0443\u043F MCP \u043A vault" });
     contentEl.createEl("p", {
-      text: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u0434\u043B\u044F \u0447\u0442\u0435\u043D\u0438\u044F \u0438 \u0437\u0430\u043F\u0438\u0441\u0438. \u0421\u043A\u043E\u043F\u0438\u0440\u0443\u0439\u0442\u0435 JSON \u0434\u043B\u044F Cursor \u0438\u043B\u0438 TOML \u0434\u043B\u044F Codex. \u0422\u043E\u043A\u0435\u043D Codex \u0437\u0430\u0434\u0430\u0451\u0442\u0441\u044F \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u043E \u0447\u0435\u0440\u0435\u0437 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u0443\u044E \u043E\u043A\u0440\u0443\u0436\u0435\u043D\u0438\u044F."
+      text: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u0434\u043B\u044F \u0447\u0442\u0435\u043D\u0438\u044F \u0438 \u0437\u0430\u043F\u0438\u0441\u0438. \u0414\u043B\u044F Cursor \u0441\u043A\u043E\u043F\u0438\u0440\u0443\u0439\u0442\u0435 JSON, \u0434\u043B\u044F \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0433\u043E Codex \u0432 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0438 ChatGPT \u2014 TOML. \u0422\u043E\u043A\u0435\u043D Codex \u0437\u0430\u0434\u0430\u0451\u0442\u0441\u044F \u0447\u0435\u0440\u0435\u0437 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u0443\u044E \u043E\u043A\u0440\u0443\u0436\u0435\u043D\u0438\u044F."
     });
     this.markdownPaths = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
     this.listEl = contentEl.createDiv({ cls: "ocm-scopes-list" });
-    new import_obsidian7.Setting(contentEl).setName("\u041D\u043E\u0432\u044B\u0439 scope").setDesc("\u041E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u0439 \u0442\u043E\u043A\u0435\u043D \u0434\u043B\u044F Cursor \u0441 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u043C\u0438 \u043F\u0430\u043F\u043A\u0430\u043C\u0438").addButton(
+    new import_obsidian7.Setting(contentEl).setName("\u041D\u043E\u0432\u044B\u0439 scope").setDesc("\u041E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u0439 \u0442\u043E\u043A\u0435\u043D \u0434\u043B\u044F Cursor \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0433\u043E Codex \u0441 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u043C\u0438 \u043F\u0430\u043F\u043A\u0430\u043C\u0438").addButton(
       (btn) => btn.setButtonText("\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope").setCta().onClick(() => {
         void this.addScope(btn);
       })
@@ -1285,7 +1308,7 @@ var ScopesModal = class extends import_obsidian7.Modal {
       }).catch(() => {
       });
       previewEl.setText(
-        fields.include.length ? `Cursor \u0443\u0432\u0438\u0434\u0438\u0442 ~${count} \u0437\u0430\u043C\u0435\u0442\u043E\u043A` + (fields.writeAccess ? `, \u0437\u0430\u043F\u0438\u0441\u044C \u0432 ${writeFolders} ${writeFolders === 1 ? "\u043F\u0430\u043F\u043A\u0435" : "\u043F\u0430\u043F\u043A\u0430\u0445"}` : ", \u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435") : "\u041D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D\u043E \u043D\u0438 \u043E\u0434\u043D\u043E\u0439 \u043F\u0430\u043F\u043A\u0438 \u2014 Cursor \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0443\u0432\u0438\u0434\u0438\u0442"
+        fields.include.length ? `MCP \u0443\u0432\u0438\u0434\u0438\u0442 ~${count} \u0437\u0430\u043C\u0435\u0442\u043E\u043A` + (fields.writeAccess ? `, \u0437\u0430\u043F\u0438\u0441\u044C \u0432 ${writeFolders} ${writeFolders === 1 ? "\u043F\u0430\u043F\u043A\u0435" : "\u043F\u0430\u043F\u043A\u0430\u0445"}` : ", \u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435") : "\u041D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D\u043E \u043D\u0438 \u043E\u0434\u043D\u043E\u0439 \u043F\u0430\u043F\u043A\u0438 \u2014 MCP \u043D\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u0442 \u0434\u043E\u0441\u0442\u0443\u043F \u043A \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u043C"
       );
     };
     const picker = new FolderScopePicker(
@@ -1330,6 +1353,23 @@ var ScopesModal = class extends import_obsidian7.Modal {
         new import_obsidian7.Notice(String(e));
       }
     }));
+    const setupSetting = new import_obsidian7.Setting(block).setName("\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430 ChatGPT \u2192 Codex").setDesc("\u0412\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 TOML \u0432 config.toml, \u0437\u0430\u0434\u0430\u0439\u0442\u0435 \u0442\u043E\u043A\u0435\u043D \u0432 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0438 \u043F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 ChatGPT. \u0414\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 Codex \u2192 Local \u0438 \u0432\u0432\u0435\u0434\u0438\u0442\u0435 /mcp.").addButton((btn) => btn.setButtonText("\u041E\u0442\u043A\u0440\u044B\u0442\u044C config.toml").onClick(async () => {
+      try {
+        const error = await openCodexConfig();
+        if (error) new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E: ${error}`);
+      } catch (e) {
+        new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E: ${e}`);
+      }
+    }));
+    if ((0, import_os2.platform)() === "win32") {
+      setupSetting.addButton((btn) => btn.setButtonText("\u041F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0435 \u0441\u0440\u0435\u0434\u044B").onClick(() => {
+        try {
+          openEnvironmentVariables((error) => new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0435 \u0441\u0440\u0435\u0434\u044B: ${error}`));
+        } catch (e) {
+          new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0435 \u0441\u0440\u0435\u0434\u044B: ${e}`);
+        }
+      }));
+    }
     new import_obsidian7.Setting(block).setName("Cursor MCP").addButton(
       (btn) => btn.setButtonText("Copy JSON").onClick(async () => {
         try {
@@ -1347,7 +1387,7 @@ var ScopesModal = class extends import_obsidian7.Modal {
         await this.client.regenerateToken(scope.id);
         await this.reload();
         this.renderList();
-        new import_obsidian7.Notice("\u0422\u043E\u043A\u0435\u043D \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D \u2014 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433 \u0432 Cursor");
+        new import_obsidian7.Notice("\u0422\u043E\u043A\u0435\u043D \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D \u2014 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433 Cursor \u0438 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u0443\u044E Codex");
       })
     ).addButton(
       (btn) => btn.setButtonText("Delete").setWarning().onClick(async () => {
