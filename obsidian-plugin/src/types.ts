@@ -5,6 +5,7 @@ export interface VaultRuntimeInfo {
   status: string;
   startedAt: string;
   vault_id: string;
+  adminToken?: string;
 }
 
 export interface AccessScope {
@@ -15,7 +16,7 @@ export interface AccessScope {
   writeAccess: boolean;
   writeInclude?: string[];
   canReindex: boolean;
-  token: string;
+  token?: string;
   tokenPreview?: string;
 }
 

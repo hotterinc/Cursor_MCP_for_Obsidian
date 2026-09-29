@@ -56,6 +56,7 @@ function globToFolderPath(pattern: string): string | null {
   const p = pattern.trim().replace(/\\/g, "/");
   if (p === "**/*.md" || p === "**/**") return ALL_VAULT_PATH;
   if (p === "*.md") return "";
+  if (p.endsWith("/*.md")) return p.slice(0, -5);
   if (p.endsWith("/**")) return p.slice(0, -3);
   if (p.endsWith("/**/*.md")) return p.slice(0, -"/**/*.md".length);
   return null;
@@ -84,7 +85,7 @@ export function selectionsFromScope(
     for (const pattern of include) {
       const folder = globToFolderPath(pattern);
       if (folder === null || !map.has(folder)) continue;
-      for (const target of cascadeTargets(nodes, folder)) {
+      for (const target of pattern.endsWith("/*.md") && !pattern.endsWith("/**/*.md") ? [folder] : cascadeTargets(nodes, folder)) {
         const cur = map.get(target)!;
         map.set(target, { read: true, write: cur.write });
       }
@@ -100,7 +101,7 @@ export function selectionsFromScope(
     for (const pattern of writePatterns) {
       const folder = globToFolderPath(pattern);
       if (folder === null || !map.has(folder)) continue;
-      for (const target of cascadeTargets(nodes, folder)) {
+      for (const target of pattern.endsWith("/*.md") && !pattern.endsWith("/**/*.md") ? [folder] : cascadeTargets(nodes, folder)) {
         map.set(target, { read: true, write: true });
       }
     }
@@ -119,75 +120,24 @@ export function syncMasterRow(nodes: FolderNode[], map: Map<string, FolderAccess
   });
 }
 
-export function scopeFromSelections(
-  nodes: FolderNode[],
-  selections: Map<string, FolderAccess>
-): { include: string[]; writeInclude: string[]; writeAccess: boolean } {
-  const rest = nodes.filter((n) => n.path !== ALL_VAULT_PATH);
-  const allRead = rest.every((n) => selections.get(n.path)?.read);
-  const allWrite = rest.every((n) => selections.get(n.path)?.write);
-
-  if (allRead) {
-    return {
-      include: ["**/*.md"],
-      writeInclude: allWrite ? ["**/*.md"] : compactWriteGlobs(nodes, selections),
-      writeAccess: allWrite || compactWriteGlobs(nodes, selections).length > 0,
-    };
-  }
-
-  const include: string[] = [];
-  const writeInclude: string[] = [];
-
-  for (const node of rest) {
-    const access = selections.get(node.path);
-    if (!access?.read) continue;
-    if (!isCoveredByAncestor(node.path, rest, selections, "read")) {
-      const glob = folderToIncludeGlob(node.path);
-      if (glob) include.push(glob);
+export function scopeFromSelections(nodes: FolderNode[], selections: Map<string, FolderAccess>): { include: string[]; writeInclude: string[]; writeAccess: boolean } {
+  const rest = nodes.filter(n => n.path !== ALL_VAULT_PATH);
+  const patterns = (field: "read" | "write"): string[] => {
+    if (rest.length && rest.every(n => selections.get(n.path)?.[field])) return ["**/*.md"];
+    const out: string[] = [];
+    const covered = new Set<string>();
+    for (const node of [...rest].sort((a,b) => a.path.split("/").length - b.path.split("/").length)) {
+      if (!selections.get(node.path)?.[field] || covered.has(node.path)) continue;
+      const descendants = cascadeTargets(nodes,node.path);
+      if (node.path && descendants.every(p => selections.get(p)?.[field])) {
+        out.push(node.path + "/**");
+        descendants.forEach(p => covered.add(p));
+      } else out.push(node.path ? node.path + "/*.md" : "*.md");
     }
-    if (access.write && !isCoveredByAncestor(node.path, rest, selections, "write")) {
-      const glob = folderToIncludeGlob(node.path);
-      if (glob && glob !== "**/*.md") writeInclude.push(glob);
-      else if (glob === "*.md") writeInclude.push("*.md");
-    }
-  }
-
-  return {
-    include,
-    writeInclude,
-    writeAccess: writeInclude.length > 0,
+    return out;
   };
-}
-
-function isCoveredByAncestor(
-  path: string,
-  nodes: FolderNode[],
-  selections: Map<string, FolderAccess>,
-  field: "read" | "write"
-): boolean {
-  if (!path) return false;
-  const parts = path.split("/");
-  for (let i = 1; i < parts.length; i++) {
-    const ancestor = parts.slice(0, i).join("/");
-    if (nodes.some((n) => n.path === ancestor) && selections.get(ancestor)?.[field]) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function compactWriteGlobs(nodes: FolderNode[], selections: Map<string, FolderAccess>): string[] {
-  const rest = nodes.filter((n) => n.path !== ALL_VAULT_PATH);
-  const out: string[] = [];
-  for (const node of rest) {
-    const access = selections.get(node.path);
-    if (!access?.write) continue;
-    if (!isCoveredByAncestor(node.path, rest, selections, "write")) {
-      const glob = folderToIncludeGlob(node.path);
-      if (glob && glob !== "**/*.md") out.push(glob);
-    }
-  }
-  return out;
+  const include = patterns("read"), writeInclude = patterns("write");
+  return {include, writeInclude, writeAccess: writeInclude.length > 0};
 }
 
 export function countWriteFolders(selections: Map<string, FolderAccess>): number {

@@ -5,9 +5,9 @@ import type { App } from "obsidian";
 /** Absolute path to plugin root (manifest.dir can be relative in Obsidian). */
 export function resolvePluginDir(
   app: App,
-  manifest: { dir: string; id: string }
+  manifest: { dir?: string; id: string }
 ): string {
-  if (path.isAbsolute(manifest.dir)) {
+  if (manifest.dir && path.isAbsolute(manifest.dir)) {
     return manifest.dir;
   }
   const base = (app.vault.adapter as { basePath?: string }).basePath;
@@ -20,7 +20,7 @@ export function resolvePluginDir(
 /** Absolute path to plugin data dir (manifest.dir can be relative in Obsidian). */
 export function resolvePluginDataDir(
   app: App,
-  manifest: { dir: string; id: string }
+  manifest: { dir?: string; id: string }
 ): string {
   return path.join(resolvePluginDir(app, manifest), "data");
 }

@@ -37,7 +37,6 @@ class VaultIndexQueue:
             return self._progress or IndexProgress(job_id="active", status=JobStatus.RUNNING)
 
         self._indexer = Indexer(ctx)
-        job_holder: list[IndexProgress] = []
 
         def _run() -> None:
             def on_progress(p: IndexProgress) -> None:

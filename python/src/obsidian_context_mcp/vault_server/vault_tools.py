@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from obsidian_context_mcp.core.context_pack import build_context_pack
@@ -14,9 +13,9 @@ from obsidian_context_mcp.core.scope_filter import filter_paths, path_in_scope
 from obsidian_context_mcp.core.sqlite_store import SQLiteStore
 from obsidian_context_mcp.core.vault import scan_markdown_files
 from obsidian_context_mcp.core.vault_context import VaultContext
+from obsidian_context_mcp.shared.types import IndexMode, PatchMode, SearchMode
 from obsidian_context_mcp.vault_server.auth import require_vault_context
 from obsidian_context_mcp.vault_server.index_queue import VaultIndexQueue
-from obsidian_context_mcp.shared.types import IndexMode, PatchMode, SearchMode
 
 
 def _scoped_ctx() -> VaultContext:
@@ -119,12 +118,13 @@ async def docs_list_notes(args: dict[str, Any]) -> dict[str, Any]:
     notes = db.list_notes(
         query=args.get("query"),
         tag=args.get("tag"),
-        limit=args.get("limit", 50),
+        limit=max(len(db.get_all_files()), 1),
     )
     scope = ctx.scope
     if scope:
         notes = [n for n in notes if path_in_scope(n.get("relative_path", ""), scope)]
-    return {"notes": notes}
+    limit = max(1, min(int(args.get("limit", 50)), 1000))
+    return {"notes": notes[:limit]}
 
 
 async def docs_patch_note(args: dict[str, Any]) -> dict[str, Any]:

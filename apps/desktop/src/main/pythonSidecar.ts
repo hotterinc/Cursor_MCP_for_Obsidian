@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { EventEmitter } from 'events'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, delimiter } from 'path'
 import { app } from 'electron'
 import { getAppDataDir } from './deepLink'
 import { log } from './logger'
@@ -67,6 +67,7 @@ export class PythonSidecar extends EventEmitter {
     if (this.proc && this.projectRoot === projectRoot) return
     await this.stop()
     this.projectRoot = projectRoot
+    this.stdoutBuffer = Buffer.alloc(0)
 
     const isDev = !app.isPackaged
     const repoRoot = join(app.getAppPath(), '..', '..')
@@ -76,17 +77,18 @@ export class PythonSidecar extends EventEmitter {
       const launch = resolveDevSidecarLaunch(pythonDir, projectRoot)
       log(`Python sidecar dev launch: ${launch.command} ${launch.args.join(' ')}`)
       this.proc = spawn(launch.command, launch.args, {
+        windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: {
           ...process.env,
           PATH: [
-            join(pythonDir, '.venv', 'bin'),
+            join(pythonDir, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin'),
             join(homedir(), 'Library', 'Python', '3.13', 'bin'),
             join(homedir(), '.local', 'bin'),
             '/opt/homebrew/bin',
             '/usr/local/bin',
             process.env.PATH ?? ''
-          ].join(':'),
+          ].join(delimiter),
           PYTHONUNBUFFERED: '1',
           OBSIDIAN_CONTEXT_DATA_DIR: getAppDataDir(),
           TOKENIZERS_PARALLELISM: 'false',
@@ -97,8 +99,9 @@ export class PythonSidecar extends EventEmitter {
         }
       })
     } else {
-      const sidecar = join(process.resourcesPath, 'python-sidecar', 'obsidian-context-mcp')
+      const sidecar = join(process.resourcesPath, 'python-sidecar', process.platform === 'win32' ? 'obsidian-context-mcp.exe' : 'obsidian-context-mcp')
       this.proc = spawn(sidecar, ['gui-backend', '--project-root', projectRoot], {
+        windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe']
       })
     }
@@ -106,6 +109,9 @@ export class PythonSidecar extends EventEmitter {
     this.proc.on('error', (err) => {
       log(`Python sidecar spawn error: ${err.message}`)
       this.emit('log', `Sidecar failed to start: ${err.message}`)
+      this.pending.forEach(p => p.reject(err))
+      this.pending.clear()
+      this.proc = null
     })
     this.proc.stdout.on('data', (chunk: Buffer) => this.handleStdout(chunk))
     this.proc.stderr.on('data', (chunk: Buffer) => {
@@ -117,6 +123,8 @@ export class PythonSidecar extends EventEmitter {
     })
     this.proc.on('exit', (code) => {
       log(`Python sidecar exited with code ${code}`)
+      this.pending.forEach(p => p.reject(new Error(`Sidecar exited with code ${code}`)))
+      this.pending.clear()
       this.proc = null
     })
 

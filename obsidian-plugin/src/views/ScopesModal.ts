@@ -5,6 +5,8 @@ import type { AccessScope } from "../types";
 import { FolderScopePicker } from "./FolderScopePicker";
 
 export class ScopesModal extends Modal {
+  private pending = new Map<string, () => Promise<void>>();
+  private saves = new Map<string, Promise<void>>();
   private scopes: AccessScope[] = [];
   private folderNodes = listVaultFolderNodes(this.app);
   private markdownPaths: string[] = [];
@@ -20,9 +22,9 @@ export class ScopesModal extends Modal {
     modalEl.style.width = "min(920px, 94vw)";
 
     contentEl.addClass("ocm-scopes-modal-content");
-    contentEl.createEl("h2", { text: "Доступ Cursor к vault" });
+    contentEl.createEl("h2", { text: "Доступ MCP к vault" });
     contentEl.createEl("p", {
-      text: "Выберите папки для чтения и записи. Скопируйте JSON в настройки MCP Cursor.",
+      text: "Выберите папки для чтения и записи. Скопируйте JSON для Cursor или TOML для Codex. Токен Codex задаётся отдельно через переменную окружения.",
     });
 
     this.markdownPaths = this.app.vault
@@ -111,10 +113,15 @@ export class ScopesModal extends Modal {
     const pickerHost = block.createDiv({ cls: "ocm-folder-picker" });
     const previewEl = block.createEl("p", { cls: "ocm-muted" });
 
+    let previewVersion = 0;
     const updatePreview = () => {
       const fields = picker.getScopeFields();
-      const count = this.countFilesForInclude(fields.include);
+      const count = this.countFilesForInclude(fields.include, scope.exclude);
       const writeFolders = picker.getWriteFolderCount();
+      const version = ++previewVersion;
+      void this.client.scopePreview({ ...scope, ...fields, token: undefined }).then(result => {
+        if (version === previewVersion) previewEl.setText(`MCP: ${result.fileCount} заметок` + (fields.writeAccess ? `, запись в ${writeFolders} папках` : ", только чтение"));
+      }).catch(() => {});
       previewEl.setText(
         fields.include.length
           ? `Cursor увидит ~${count} заметок` +
@@ -134,11 +141,17 @@ export class ScopesModal extends Modal {
     );
 
     let saveTimer: number | null = null;
+    const flush = async () => {
+      if (saveTimer !== null) window.clearTimeout(saveTimer);
+      saveTimer = null;
+      await this.applyPicker(scope, picker);
+    };
+    this.pending.set(scope.id, flush);
     picker.onChange(() => {
       updatePreview();
       if (saveTimer !== null) window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(() => {
-        void this.applyPicker(scope, picker).catch((e) => new Notice(String(e)));
+        void flush().catch((e) => new Notice(String(e)));
       }, 400);
     });
     updatePreview();
@@ -149,10 +162,30 @@ export class ScopesModal extends Modal {
       .addText((t) => t.setValue(scope.id).setDisabled(true));
 
     new Setting(block)
+      .setName("Codex MCP")
+      .addButton(btn => btn.setButtonText("Copy Codex config").onClick(async () => {
+        try {
+          await this.flushScope(scope.id);
+          const res = await this.client.codexConfig(scope.id);
+          await navigator.clipboard.writeText(res.config);
+          new Notice("Конфиг Codex скопирован");
+        } catch(e) { new Notice(String(e)); }
+      }))
+      .addButton(btn => btn.setButtonText("Copy scope token").onClick(async () => {
+        try {
+          await this.flushScope(scope.id);
+          const res = await this.client.scopeToken(scope.id);
+          await navigator.clipboard.writeText(res.token);
+          new Notice(`Токен скопирован: задайте ${res.tokenEnvVar} перед запуском Codex`);
+        } catch(e) { new Notice(String(e)); }
+      }));
+
+    new Setting(block)
       .setName("Cursor MCP")
       .addButton((btn) =>
         btn.setButtonText("Copy JSON").onClick(async () => {
           try {
+            await this.flushScope(scope.id);
             const res = await this.client.cursorConfig(scope.id);
             await navigator.clipboard.writeText(JSON.stringify(res.config, null, 2));
             new Notice("Конфиг Cursor скопирован");
@@ -163,6 +196,7 @@ export class ScopesModal extends Modal {
       )
       .addButton((btn) =>
         btn.setButtonText("Regenerate token").onClick(async () => {
+          await this.flushScope(scope.id);
           await this.client.regenerateToken(scope.id);
           await this.reload();
           this.renderList();
@@ -174,6 +208,8 @@ export class ScopesModal extends Modal {
           .setButtonText("Delete")
           .setWarning()
           .onClick(async () => {
+            await this.flushScope(scope.id);
+            this.pending.delete(scope.id);
             await this.client.deleteScope(scope.id);
             await this.reload();
             this.renderList();
@@ -181,17 +217,19 @@ export class ScopesModal extends Modal {
       );
   }
 
-  private countFilesForInclude(include: string[]): number {
+  private countFilesForInclude(include: string[], exclude: string[]): number {
     if (!include.length) return 0;
-    if (include.includes("**/*.md")) return this.markdownPaths.length;
+
     let count = 0;
     for (const file of this.markdownPaths) {
-      if (include.some((p) => this.fileMatchesGlob(file, p))) count++;
+      if (include.some((p) => this.fileMatchesGlob(file, p)) && !exclude.some(p => this.fileMatchesGlob(file, p))) count++;
     }
     return count;
   }
 
   private fileMatchesGlob(file: string, pattern: string): boolean {
+    if (pattern === "**/*.md") return file.endsWith(".md");
+    if (pattern !== "*.md" && pattern.endsWith("/*.md") && !pattern.endsWith("/**/*.md")) return file.slice(0, file.lastIndexOf("/")) === pattern.slice(0, -5);
     if (pattern === "*.md") return !file.includes("/");
     if (pattern.endsWith("/**")) {
       const prefix = pattern.slice(0, -3);
@@ -213,10 +251,20 @@ export class ScopesModal extends Modal {
   }
 
   private async saveScope(scope: AccessScope) {
-    await this.client.upsertScope(scope);
+    const previous = this.saves.get(scope.id) ?? Promise.resolve();
+    const payload = { ...scope, token: undefined };
+    const save = previous.catch(() => {}).then(async () => { await this.client.upsertScope(payload); });
+    this.saves.set(scope.id, save);
+    await save;
+  }
+
+  private async flushScope(id: string) {
+    await this.pending.get(id)?.();
+    await this.saves.get(id);
   }
 
   onClose() {
+    for (const id of this.pending.keys()) void this.flushScope(id).catch(e => new Notice(`Scope save failed: ${e}`));
     this.contentEl.empty();
   }
 }

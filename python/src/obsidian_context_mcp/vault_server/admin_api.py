@@ -6,13 +6,14 @@ import asyncio
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from obsidian_context_mcp.core.diagnostics import run_diagnostics_for_vault
+from obsidian_context_mcp.core.errors import PathSecurityError, ScopeAccessDeniedError
 from obsidian_context_mcp.core.indexer import Indexer
+from obsidian_context_mcp.core.llm_local import list_local_models
 from obsidian_context_mcp.core.llm_service import (
     DEFAULT_OLLAMA_HOST,
     LLM_PRESETS,
@@ -23,7 +24,6 @@ from obsidian_context_mcp.core.llm_service import (
     ollama_health,
     ollama_model_available,
 )
-from obsidian_context_mcp.core.llm_local import list_local_models
 from obsidian_context_mcp.core.retrieval import Retriever
 from obsidian_context_mcp.core.scope_filter import filter_paths
 from obsidian_context_mcp.core.scope_store import generate_scope_token
@@ -84,9 +84,11 @@ class AdminApi:
         rel = body.get("relativePath") or body.get("relative_path")
         if not rel or not isinstance(rel, str):
             return JSONResponse({"error": "relativePath required"}, status_code=400)
-        rel_norm = rel.replace("\\", "/").lstrip("/")
+        rel_norm = rel.replace("\\", "/")
         try:
             await asyncio.to_thread(Indexer(self.vault_ctx).index_file, rel_norm)
+        except (PathSecurityError, ScopeAccessDeniedError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
         return JSONResponse({"ok": True, "relativePath": rel_norm})
@@ -95,7 +97,7 @@ class AdminApi:
         scopes = self.vault_ctx.scope_store.list_scopes()
         safe = []
         for s in scopes:
-            item = s.model_dump(by_alias=True)
+            item = s.model_dump(by_alias=True, exclude={"token"})
             item["tokenPreview"] = s.token[:12] + "..." if s.token else ""
             safe.append(item)
         return JSONResponse({"scopes": safe})
@@ -103,10 +105,10 @@ class AdminApi:
     async def upsert_scope(self, request: Request) -> Response:
         body = await request.json()
         scope = AccessScope.model_validate(body)
-        if not scope.token:
-            scope.token = generate_scope_token()
+        existing = self.vault_ctx.scope_store.get_by_id(scope.id)
+        scope.token = existing.token if existing else generate_scope_token()
         saved = self.vault_ctx.scope_store.upsert(scope)
-        return JSONResponse(saved.model_dump(by_alias=True))
+        return JSONResponse(saved.model_dump(by_alias=True, exclude={"token"}))
 
     async def delete_scope(self, request: Request) -> Response:
         scope_id = request.path_params["scope_id"]
@@ -118,7 +120,7 @@ class AdminApi:
         scope = self.vault_ctx.scope_store.regenerate_token(scope_id)
         if scope is None:
             return JSONResponse({"error": "not found"}, status_code=404)
-        return JSONResponse(scope.model_dump(by_alias=True))
+        return JSONResponse(scope.model_dump(by_alias=True, exclude={"token"}))
 
     async def scope_preview(self, request: Request) -> Response:
         body = await request.json()
@@ -150,7 +152,30 @@ class AdminApi:
                 }
             }
         }
-        return JSONResponse({"config": config, "scope": scope.model_dump(by_alias=True)})
+        return JSONResponse({"config": config, "scope": scope.model_dump(by_alias=True, exclude={"token"})})
+
+    async def scope_token(self, request: Request) -> Response:
+        scope = self.vault_ctx.scope_store.get_by_id(request.path_params["scope_id"])
+        if scope is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({"token": scope.token, "tokenEnvVar": "OBSIDIAN_CONTEXT_SCOPE_TOKEN"})
+
+    async def codex_config(self, request: Request) -> Response:
+        scope = self.vault_ctx.scope_store.get_by_id(request.path_params["scope_id"])
+        if scope is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        runtime_path = self.vault_ctx.data_dir / "runtime.json"
+        if not runtime_path.exists():
+            return JSONResponse({"error": "Server runtime is unavailable"}, status_code=503)
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+        url = f'http://127.0.0.1:{int(runtime["port"])}/mcp'
+        config = (
+            '[mcp_servers.obsidian_context]\n'
+            f'url = {json.dumps(url)}\n'
+            'bearer_token_env_var = "OBSIDIAN_CONTEXT_SCOPE_TOKEN"\n'
+        )
+        return JSONResponse({"config": config, "tokenEnvVar": "OBSIDIAN_CONTEXT_SCOPE_TOKEN",
+                             "scope": scope.model_dump(by_alias=True, exclude={"token"})})
 
     async def diagnostics(self, _request: Request) -> Response:
         checks = run_diagnostics_for_vault(self.vault_ctx)

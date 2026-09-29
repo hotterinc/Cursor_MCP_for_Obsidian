@@ -9,11 +9,12 @@ from obsidian_context_mcp.core.editor import Editor
 from obsidian_context_mcp.core.project import detect_project_context
 from obsidian_context_mcp.core.retrieval import Retriever
 from obsidian_context_mcp.core.sqlite_store import SQLiteStore
+from obsidian_context_mcp.mcp_server.context import project_root_override
 from obsidian_context_mcp.shared.types import SearchMode
 
 
 async def read_resource(uri: str, project_root: str | None = None) -> str:
-    ctx = detect_project_context(cli_root=project_root)
+    ctx = detect_project_context(cli_root=project_root or project_root_override.get())
     if ctx is None:
         return json.dumps({"error": "project not found"})
 

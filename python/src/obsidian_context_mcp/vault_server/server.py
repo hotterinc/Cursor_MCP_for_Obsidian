@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import signal
 import socket
 import threading
@@ -17,7 +18,7 @@ from obsidian_context_mcp.core.indexer import Indexer
 from obsidian_context_mcp.core.locks import PathLock
 from obsidian_context_mcp.core.logging import setup_logging
 from obsidian_context_mcp.core.ml_runtime import configure_ml_runtime
-from obsidian_context_mcp.core.vault_context import VaultContext, get_vault_context
+from obsidian_context_mcp.core.vault_context import get_vault_context
 from obsidian_context_mcp.core.vault_paths import get_runtime_path, get_vault_locks_dir
 from obsidian_context_mcp.core.watcher import VaultWatcher
 from obsidian_context_mcp.shared.constants import DEFAULT_VAULT_SERVER_HOST
@@ -32,18 +33,22 @@ def _pick_free_port(host: str) -> int:
         return int(s.getsockname()[1])
 
 
-def _write_runtime(data_dir: Path, *, port: int, host: str, vault_id: str) -> None:
+def _write_runtime(data_dir: Path, *, port: int, host: str, vault_id: str, admin_token: str) -> None:
     info = VaultRuntimeInfo(
         port=port,
         pid=os.getpid(),
         host=host,
         status="running",
-        started_at=datetime.utcnow().isoformat() + "Z",
-        vault_id=vault_id,
+        startedAt=datetime.utcnow().isoformat() + "Z",
+        vaultId=vault_id,
     )
-    get_runtime_path(data_dir).write_text(
-        info.model_dump_json(by_alias=True, indent=2), encoding="utf-8"
-    )
+    runtime = info.model_dump(by_alias=True)
+    runtime["adminToken"] = admin_token
+    path = get_runtime_path(data_dir)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(runtime, indent=2), encoding="utf-8")
+    temporary.chmod(0o600)
+    temporary.replace(path)
 
 
 def _clear_runtime(data_dir: Path) -> None:
@@ -72,6 +77,7 @@ def run_vault_server(
         logger.error("Another vault-server is already running for this vault")
         raise SystemExit(1) from None
 
+    admin_token = secrets.token_urlsafe(32)
     chosen_port = port if port > 0 else _pick_free_port(host)
 
     def _shutdown(*_args: object) -> None:
@@ -93,12 +99,12 @@ def run_vault_server(
             indexer.run(IndexMode.INCREMENTAL)
 
     def _on_startup() -> None:
-        _write_runtime(resolved_data, port=chosen_port, host=host, vault_id=ctx.vault_id)
+        _write_runtime(resolved_data, port=chosen_port, host=host, vault_id=ctx.vault_id, admin_token=admin_token)
         logger.info("Vault server listening on http://{}:{}", host, chosen_port)
         watcher.start()
         threading.Thread(target=_initial_index, daemon=True).start()
 
-    app = create_http_app(ctx, on_startup=_on_startup)
+    app = create_http_app(ctx, admin_token=admin_token, on_startup=_on_startup)
     try:
         uvicorn.run(app, host=host, port=chosen_port, log_level="info")
     finally:

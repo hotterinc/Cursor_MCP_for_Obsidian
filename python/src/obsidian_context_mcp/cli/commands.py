@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import typer
 
@@ -11,7 +12,7 @@ from obsidian_context_mcp.core.diagnostics import run_diagnostics_for_root
 from obsidian_context_mcp.core.indexer import Indexer
 from obsidian_context_mcp.core.logging import setup_logging
 from obsidian_context_mcp.core.ml_runtime import configure_ml_runtime
-from obsidian_context_mcp.core.project import detect_project_context
+from obsidian_context_mcp.core.project import ProjectContext, detect_project_context
 from obsidian_context_mcp.core.vault import validate_vault_path
 from obsidian_context_mcp.gui_backend.server import run_gui_backend
 from obsidian_context_mcp.mcp_server.server import run_mcp_server
@@ -19,7 +20,7 @@ from obsidian_context_mcp.shared.constants import DEFAULT_VAULT_SERVER_PORT
 from obsidian_context_mcp.shared.types import IndexMode
 
 
-def _require_ctx(project_root: str | None):
+def _require_ctx(project_root: str | None) -> ProjectContext:
     ctx = detect_project_context(cli_root=project_root)
     if ctx is None:
         typer.echo("Error: could not detect project root", err=True)
@@ -48,31 +49,21 @@ def vault_server(
 def cursor_proxy(
     port: int = typer.Option(..., "--port"),
     host: str = typer.Option("127.0.0.1", "--host"),
-    token: str = typer.Option(..., "--token"),
+    token: str | None = typer.Option(None, "--token"),
+    token_env: str = typer.Option("OBSIDIAN_CONTEXT_SCOPE_TOKEN", "--token-env"),
 ) -> None:
-    """Thin stdio proxy to HTTP MCP for Cursor clients without url support."""
-    import sys
+    """Forward stdio MCP tools to the vault server's authenticated SSE endpoint."""
+    from obsidian_context_mcp.mcp_server.proxy import run_cursor_proxy
 
-    import httpx
-
-    base = f"http://{host}:{port}"
-    headers = {"Authorization": f"Bearer {token}"}
-
-    typer.echo(f"Cursor proxy connecting to {base}/sse", err=True)
-    # Minimal placeholder: instruct user to use url config instead
-    typer.echo(
-        json.dumps(
-            {
-                "error": "Use Cursor url-based MCP config",
-                "example": {
-                    "url": f"{base}/sse",
-                    "headers": headers,
-                },
-            }
-        ),
-        err=True,
-    )
-    raise typer.Exit(1)
+    credential = token or os.environ.get(token_env)
+    if not credential:
+        typer.echo(f"Set {token_env} or pass --token", err=True)
+        raise typer.Exit(2)
+    try:
+        asyncio.run(run_cursor_proxy(f"http://{host}:{port}/sse", credential))
+    except Exception as exc:
+        typer.echo(f"Cursor proxy failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 def gui_backend(project_root: str = typer.Option(..., "--project-root")) -> None:

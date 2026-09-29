@@ -18,11 +18,12 @@ from obsidian_context_mcp.core.project import (
 from obsidian_context_mcp.core.retrieval import Retriever
 from obsidian_context_mcp.core.sqlite_store import SQLiteStore
 from obsidian_context_mcp.core.vault import validate_vault_path
+from obsidian_context_mcp.mcp_server.context import project_root_override
 from obsidian_context_mcp.shared.types import IndexMode, PatchMode, SearchMode
 
 
 def _ctx(project_root: str | None) -> ProjectContext:
-    ctx = detect_project_context(cli_root=project_root)
+    ctx = detect_project_context(cli_root=project_root or project_root_override.get())
     if ctx is None:
         raise ValueError("Project root not found")
     return ctx

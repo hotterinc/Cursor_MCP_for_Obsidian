@@ -37,17 +37,18 @@ var import_obsidian11 = require("obsidian");
 // src/sidecar/client.ts
 var import_obsidian = require("obsidian");
 var SidecarClient = class _SidecarClient {
-  constructor(baseUrl) {
+  constructor(baseUrl, adminToken) {
     this.baseUrl = baseUrl;
+    this.adminToken = adminToken;
   }
   static fromRuntime(runtime) {
-    return new _SidecarClient(`http://${runtime.host}:${runtime.port}`);
+    return new _SidecarClient(`http://${runtime.host}:${runtime.port}`, runtime.adminToken);
   }
   async request(path3, init) {
     const res = await (0, import_obsidian.requestUrl)({
       url: `${this.baseUrl}${path3}`,
       method: init?.method ?? "GET",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...this.adminToken ? { Authorization: `Bearer ${this.adminToken}` } : {} },
       body: init?.body,
       throw: false
     });
@@ -89,7 +90,7 @@ var SidecarClient = class _SidecarClient {
   upsertScope(scope) {
     return this.request("/api/v1/scopes", {
       method: "POST",
-      body: JSON.stringify(scope)
+      body: JSON.stringify({ ...scope, token: void 0 })
     });
   }
   deleteScope(scopeId) {
@@ -108,6 +109,12 @@ var SidecarClient = class _SidecarClient {
     return this.request(
       `/api/v1/scopes/${encodeURIComponent(scopeId)}/cursor-config`
     );
+  }
+  codexConfig(scopeId) {
+    return this.request(`/api/v1/scopes/${encodeURIComponent(scopeId)}/codex-config`);
+  }
+  scopeToken(scopeId) {
+    return this.request(`/api/v1/scopes/${encodeURIComponent(scopeId)}/token`);
   }
   scopePreview(scope) {
     return this.request("/api/v1/scopes/preview", {
@@ -149,7 +156,7 @@ var import_obsidian2 = require("obsidian");
 var fs = __toESM(require("fs"));
 var path = __toESM(require("path"));
 function resolvePluginDir(app, manifest) {
-  if (path.isAbsolute(manifest.dir)) {
+  if (manifest.dir && path.isAbsolute(manifest.dir)) {
     return manifest.dir;
   }
   const base = app.vault.adapter.basePath;
@@ -197,17 +204,20 @@ function activeSidecarPath(pluginDir, pythonCommand) {
 
 // src/sidecar/manager.ts
 var SIDECAR_STARTUP_TIMEOUT_MS = 12e4;
-async function healthCheck(url, timeoutMs) {
+async function healthCheck(url, timeoutMs, vaultId) {
+  let timer;
   try {
     const res = await Promise.race([
       (0, import_obsidian2.requestUrl)({ url, method: "GET", throw: false }),
       new Promise(
-        (_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)
+        (_, reject) => timer = setTimeout(() => reject(new Error("timeout")), timeoutMs)
       )
     ]);
-    return res.status >= 200 && res.status < 300;
+    return res.status >= 200 && res.status < 300 && res.json?.vaultId === vaultId;
   } catch {
     return false;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 function isPidAlive(pid) {
@@ -239,18 +249,13 @@ function unlinkIfExists(filePath) {
   } catch {
   }
 }
-function findListenerPids(port) {
-  if (port <= 0 || process.platform === "win32") return [];
+function ownsServerPid(pid, dataDir) {
   try {
-    const res = (0, import_child_process.spawnSync)(
-      "lsof",
-      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
-      { encoding: "utf-8" }
-    );
-    if (res.status !== 0 || !res.stdout.trim()) return [];
-    return res.stdout.trim().split("\n").map((s) => Number.parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n > 0);
+    const result = process.platform === "win32" ? (0, import_child_process.spawnSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`], { encoding: "utf8", windowsHide: true }) : (0, import_child_process.spawnSync)("ps", ["-p", String(pid), "-o", "args="], { encoding: "utf8" });
+    const command = result.stdout?.replace(/\\/g, "/") ?? "";
+    return result.status === 0 && command.includes("vault-server") && command.includes(dataDir.replace(/\\/g, "/"));
   } catch {
-    return [];
+    return false;
   }
 }
 function logVaultServerLine(text, stream) {
@@ -299,12 +304,7 @@ var SidecarManager = class {
     const runtime = this.readRuntime();
     if (runtime?.pid) pids.add(runtime.pid);
     if (this.process?.pid) pids.add(this.process.pid);
-    if (this.serverPort > 0) {
-      for (const pid of findListenerPids(this.serverPort)) {
-        pids.add(pid);
-      }
-    }
-    return [...pids];
+    return [...pids].filter((pid) => pid === this.process?.pid || ownsServerPid(pid, this.dataDir));
   }
   async terminatePid(pid, timeoutMs = 5e3) {
     if (!isPidAlive(pid)) return;
@@ -326,7 +326,12 @@ var SidecarManager = class {
   }
   /** Stop every vault-server instance tied to this vault data dir. */
   async clearServerState() {
-    for (const pid of this.collectServerPids()) {
+    const candidates = [this.readLockPid(), this.readRuntime()?.pid].filter((pid) => !!pid && isPidAlive(pid));
+    const owned = this.collectServerPids();
+    if (candidates.some((pid) => !owned.includes(pid))) {
+      throw new Error("Cannot restart: runtime/lock refers to an unverified process. It was left running.");
+    }
+    for (const pid of owned) {
       await this.terminatePid(pid);
     }
     this.process = null;
@@ -339,7 +344,16 @@ var SidecarManager = class {
     await this.clearServerState();
   }
   async isHealthy(runtime) {
-    return healthCheck(`http://${runtime.host}:${runtime.port}/health`, 2e3);
+    if (!runtime.adminToken || !runtime.vault_id || runtime.host !== "127.0.0.1") return false;
+    let config;
+    try {
+      config = JSON.parse(fs2.readFileSync(path2.join(this.dataDir, "vault.json"), "utf8"));
+    } catch {
+      return false;
+    }
+    if (path2.resolve(config.vault_real_path ?? config.vault_path ?? "") !== fs2.realpathSync(this.vaultPath)) return false;
+    if (runtime.vault_id !== config.vault_id || this.serverPort > 0 && runtime.port !== this.serverPort) return false;
+    return healthCheck(`http://${runtime.host}:${runtime.port}/health`, 2e3, runtime.vault_id);
   }
   async prepareForStart() {
     const existing = this.readRuntime();
@@ -347,11 +361,10 @@ var SidecarManager = class {
       this.ownsProcess = false;
       return existing;
     }
-    const portBlocked = this.serverPort > 0 && findListenerPids(this.serverPort).length > 0;
     const lockPid = this.readLockPid();
     const staleLock = lockPid !== null && isPidAlive(lockPid);
     const staleRuntime = existing !== null && !await this.isHealthy(existing);
-    if (portBlocked || staleLock || staleRuntime) {
+    if (staleLock || staleRuntime) {
       await this.clearServerState();
     } else {
       unlinkIfExists(this.lockPath);
@@ -397,6 +410,7 @@ var SidecarManager = class {
           {
             stdio: ["ignore", "pipe", "pipe"],
             detached: true,
+            windowsHide: true,
             env: {
               ...process.env,
               TOKENIZERS_PARALLELISM: "false",
@@ -432,14 +446,9 @@ var SidecarManager = class {
           console.warn(`[vault-server] exited with code ${code}`);
         }
       });
-      this.waitForHealthyRuntime(SIDECAR_STARTUP_TIMEOUT_MS).then((runtime) => {
+      this.waitForHealthyRuntime(SIDECAR_STARTUP_TIMEOUT_MS, () => settled).then((runtime) => {
         if (settled) return;
         settled = true;
-        this.process?.stdout?.removeAllListeners("data");
-        this.process?.stderr?.removeAllListeners("data");
-        this.process?.removeAllListeners("exit");
-        this.process = null;
-        this.ownsProcess = false;
         resolve2(runtime);
       }).catch(fail);
     });
@@ -457,7 +466,8 @@ var SidecarManager = class {
         host: raw.host ?? "127.0.0.1",
         status: raw.status,
         startedAt: raw.started_at ?? raw.startedAt,
-        vault_id: raw.vault_id ?? raw.vaultId
+        vault_id: raw.vault_id ?? raw.vaultId,
+        adminToken: raw.adminToken ?? raw.admin_token
       };
     } catch {
       return null;
@@ -471,28 +481,17 @@ var SidecarManager = class {
       this.process = null;
       return runtime;
     }
-    if (this.serverPort > 0 && findListenerPids(this.serverPort).length > 0) {
-      const orphan = {
-        port: this.serverPort,
-        host: "127.0.0.1",
-        pid: findListenerPids(this.serverPort)[0] ?? 0,
-        status: "running",
-        startedAt: "",
-        vault_id: ""
-      };
-      if (await this.isHealthy(orphan)) {
-        this.ownsProcess = false;
-        this.process = null;
-        return orphan;
-      }
-    }
     return null;
   }
-  waitForHealthyRuntime(timeoutMs) {
+  waitForHealthyRuntime(timeoutMs, cancelled) {
     const started = Date.now();
     return new Promise((resolve2, reject) => {
       const tick = () => {
         void (async () => {
+          if (cancelled()) {
+            reject(new Error("Startup cancelled"));
+            return;
+          }
           const runtime = this.readRuntime();
           if (runtime?.port && await this.isHealthy(runtime)) {
             resolve2(runtime);
@@ -1017,14 +1016,11 @@ function cascadeTargets(nodes, path3) {
   const prefix = `${path3}/`;
   return nodes.filter((n) => n.path === path3 || n.path.startsWith(prefix)).map((n) => n.path);
 }
-function folderToIncludeGlob(path3) {
-  if (path3 === ALL_VAULT_PATH) return "**/*.md";
-  return path3 ? `${path3}/**` : "*.md";
-}
 function globToFolderPath(pattern) {
   const p = pattern.trim().replace(/\\/g, "/");
   if (p === "**/*.md" || p === "**/**") return ALL_VAULT_PATH;
   if (p === "*.md") return "";
+  if (p.endsWith("/*.md")) return p.slice(0, -5);
   if (p.endsWith("/**")) return p.slice(0, -3);
   if (p.endsWith("/**/*.md")) return p.slice(0, -"/**/*.md".length);
   return null;
@@ -1045,7 +1041,7 @@ function selectionsFromScope(nodes, include, writeInclude, writeAccess) {
     for (const pattern of include) {
       const folder = globToFolderPath(pattern);
       if (folder === null || !map.has(folder)) continue;
-      for (const target of cascadeTargets(nodes, folder)) {
+      for (const target of pattern.endsWith("/*.md") && !pattern.endsWith("/**/*.md") ? [folder] : cascadeTargets(nodes, folder)) {
         const cur = map.get(target);
         map.set(target, { read: true, write: cur.write });
       }
@@ -1060,7 +1056,7 @@ function selectionsFromScope(nodes, include, writeInclude, writeAccess) {
     for (const pattern of writePatterns) {
       const folder = globToFolderPath(pattern);
       if (folder === null || !map.has(folder)) continue;
-      for (const target of cascadeTargets(nodes, folder)) {
+      for (const target of pattern.endsWith("/*.md") && !pattern.endsWith("/**/*.md") ? [folder] : cascadeTargets(nodes, folder)) {
         map.set(target, { read: true, write: true });
       }
     }
@@ -1077,59 +1073,22 @@ function syncMasterRow(nodes, map) {
 }
 function scopeFromSelections(nodes, selections) {
   const rest = nodes.filter((n) => n.path !== ALL_VAULT_PATH);
-  const allRead = rest.every((n) => selections.get(n.path)?.read);
-  const allWrite = rest.every((n) => selections.get(n.path)?.write);
-  if (allRead) {
-    return {
-      include: ["**/*.md"],
-      writeInclude: allWrite ? ["**/*.md"] : compactWriteGlobs(nodes, selections),
-      writeAccess: allWrite || compactWriteGlobs(nodes, selections).length > 0
-    };
-  }
-  const include = [];
-  const writeInclude = [];
-  for (const node of rest) {
-    const access = selections.get(node.path);
-    if (!access?.read) continue;
-    if (!isCoveredByAncestor(node.path, rest, selections, "read")) {
-      const glob = folderToIncludeGlob(node.path);
-      if (glob) include.push(glob);
+  const patterns = (field) => {
+    if (rest.length && rest.every((n) => selections.get(n.path)?.[field])) return ["**/*.md"];
+    const out = [];
+    const covered = /* @__PURE__ */ new Set();
+    for (const node of [...rest].sort((a, b) => a.path.split("/").length - b.path.split("/").length)) {
+      if (!selections.get(node.path)?.[field] || covered.has(node.path)) continue;
+      const descendants = cascadeTargets(nodes, node.path);
+      if (node.path && descendants.every((p) => selections.get(p)?.[field])) {
+        out.push(node.path + "/**");
+        descendants.forEach((p) => covered.add(p));
+      } else out.push(node.path ? node.path + "/*.md" : "*.md");
     }
-    if (access.write && !isCoveredByAncestor(node.path, rest, selections, "write")) {
-      const glob = folderToIncludeGlob(node.path);
-      if (glob && glob !== "**/*.md") writeInclude.push(glob);
-      else if (glob === "*.md") writeInclude.push("*.md");
-    }
-  }
-  return {
-    include,
-    writeInclude,
-    writeAccess: writeInclude.length > 0
+    return out;
   };
-}
-function isCoveredByAncestor(path3, nodes, selections, field) {
-  if (!path3) return false;
-  const parts = path3.split("/");
-  for (let i = 1; i < parts.length; i++) {
-    const ancestor = parts.slice(0, i).join("/");
-    if (nodes.some((n) => n.path === ancestor) && selections.get(ancestor)?.[field]) {
-      return true;
-    }
-  }
-  return false;
-}
-function compactWriteGlobs(nodes, selections) {
-  const rest = nodes.filter((n) => n.path !== ALL_VAULT_PATH);
-  const out = [];
-  for (const node of rest) {
-    const access = selections.get(node.path);
-    if (!access?.write) continue;
-    if (!isCoveredByAncestor(node.path, rest, selections, "write")) {
-      const glob = folderToIncludeGlob(node.path);
-      if (glob && glob !== "**/*.md") out.push(glob);
-    }
-  }
-  return out;
+  const include = patterns("read"), writeInclude = patterns("write");
+  return { include, writeInclude, writeAccess: writeInclude.length > 0 };
 }
 
 // src/views/FolderScopePicker.ts
@@ -1236,6 +1195,8 @@ var ScopesModal = class extends import_obsidian7.Modal {
   constructor(app, client) {
     super(app);
     this.client = client;
+    this.pending = /* @__PURE__ */ new Map();
+    this.saves = /* @__PURE__ */ new Map();
     this.scopes = [];
     this.folderNodes = listVaultFolderNodes(this.app);
     this.markdownPaths = [];
@@ -1246,9 +1207,9 @@ var ScopesModal = class extends import_obsidian7.Modal {
     modalEl.style.setProperty("--modal-width", "920px");
     modalEl.style.width = "min(920px, 94vw)";
     contentEl.addClass("ocm-scopes-modal-content");
-    contentEl.createEl("h2", { text: "\u0414\u043E\u0441\u0442\u0443\u043F Cursor \u043A vault" });
+    contentEl.createEl("h2", { text: "\u0414\u043E\u0441\u0442\u0443\u043F MCP \u043A vault" });
     contentEl.createEl("p", {
-      text: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u0434\u043B\u044F \u0447\u0442\u0435\u043D\u0438\u044F \u0438 \u0437\u0430\u043F\u0438\u0441\u0438. \u0421\u043A\u043E\u043F\u0438\u0440\u0443\u0439\u0442\u0435 JSON \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 MCP Cursor."
+      text: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u0434\u043B\u044F \u0447\u0442\u0435\u043D\u0438\u044F \u0438 \u0437\u0430\u043F\u0438\u0441\u0438. \u0421\u043A\u043E\u043F\u0438\u0440\u0443\u0439\u0442\u0435 JSON \u0434\u043B\u044F Cursor \u0438\u043B\u0438 TOML \u0434\u043B\u044F Codex. \u0422\u043E\u043A\u0435\u043D Codex \u0437\u0430\u0434\u0430\u0451\u0442\u0441\u044F \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u043E \u0447\u0435\u0440\u0435\u0437 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u0443\u044E \u043E\u043A\u0440\u0443\u0436\u0435\u043D\u0438\u044F."
     });
     this.markdownPaths = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
     this.listEl = contentEl.createDiv({ cls: "ocm-scopes-list" });
@@ -1313,10 +1274,16 @@ var ScopesModal = class extends import_obsidian7.Modal {
     );
     const pickerHost = block.createDiv({ cls: "ocm-folder-picker" });
     const previewEl = block.createEl("p", { cls: "ocm-muted" });
+    let previewVersion = 0;
     const updatePreview = () => {
       const fields = picker.getScopeFields();
-      const count = this.countFilesForInclude(fields.include);
+      const count = this.countFilesForInclude(fields.include, scope.exclude);
       const writeFolders = picker.getWriteFolderCount();
+      const version = ++previewVersion;
+      void this.client.scopePreview({ ...scope, ...fields, token: void 0 }).then((result) => {
+        if (version === previewVersion) previewEl.setText(`MCP: ${result.fileCount} \u0437\u0430\u043C\u0435\u0442\u043E\u043A` + (fields.writeAccess ? `, \u0437\u0430\u043F\u0438\u0441\u044C \u0432 ${writeFolders} \u043F\u0430\u043F\u043A\u0430\u0445` : ", \u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435"));
+      }).catch(() => {
+      });
       previewEl.setText(
         fields.include.length ? `Cursor \u0443\u0432\u0438\u0434\u0438\u0442 ~${count} \u0437\u0430\u043C\u0435\u0442\u043E\u043A` + (fields.writeAccess ? `, \u0437\u0430\u043F\u0438\u0441\u044C \u0432 ${writeFolders} ${writeFolders === 1 ? "\u043F\u0430\u043F\u043A\u0435" : "\u043F\u0430\u043F\u043A\u0430\u0445"}` : ", \u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435") : "\u041D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D\u043E \u043D\u0438 \u043E\u0434\u043D\u043E\u0439 \u043F\u0430\u043F\u043A\u0438 \u2014 Cursor \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0443\u0432\u0438\u0434\u0438\u0442"
       );
@@ -1329,18 +1296,44 @@ var ScopesModal = class extends import_obsidian7.Modal {
       scope.writeAccess
     );
     let saveTimer = null;
+    const flush = async () => {
+      if (saveTimer !== null) window.clearTimeout(saveTimer);
+      saveTimer = null;
+      await this.applyPicker(scope, picker);
+    };
+    this.pending.set(scope.id, flush);
     picker.onChange(() => {
       updatePreview();
       if (saveTimer !== null) window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(() => {
-        void this.applyPicker(scope, picker).catch((e) => new import_obsidian7.Notice(String(e)));
+        void flush().catch((e) => new import_obsidian7.Notice(String(e)));
       }, 400);
     });
     updatePreview();
     new import_obsidian7.Setting(block).setName("Scope ID").setDesc(scope.id).addText((t) => t.setValue(scope.id).setDisabled(true));
+    new import_obsidian7.Setting(block).setName("Codex MCP").addButton((btn) => btn.setButtonText("Copy Codex config").onClick(async () => {
+      try {
+        await this.flushScope(scope.id);
+        const res = await this.client.codexConfig(scope.id);
+        await navigator.clipboard.writeText(res.config);
+        new import_obsidian7.Notice("\u041A\u043E\u043D\u0444\u0438\u0433 Codex \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D");
+      } catch (e) {
+        new import_obsidian7.Notice(String(e));
+      }
+    })).addButton((btn) => btn.setButtonText("Copy scope token").onClick(async () => {
+      try {
+        await this.flushScope(scope.id);
+        const res = await this.client.scopeToken(scope.id);
+        await navigator.clipboard.writeText(res.token);
+        new import_obsidian7.Notice(`\u0422\u043E\u043A\u0435\u043D \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D: \u0437\u0430\u0434\u0430\u0439\u0442\u0435 ${res.tokenEnvVar} \u043F\u0435\u0440\u0435\u0434 \u0437\u0430\u043F\u0443\u0441\u043A\u043E\u043C Codex`);
+      } catch (e) {
+        new import_obsidian7.Notice(String(e));
+      }
+    }));
     new import_obsidian7.Setting(block).setName("Cursor MCP").addButton(
       (btn) => btn.setButtonText("Copy JSON").onClick(async () => {
         try {
+          await this.flushScope(scope.id);
           const res = await this.client.cursorConfig(scope.id);
           await navigator.clipboard.writeText(JSON.stringify(res.config, null, 2));
           new import_obsidian7.Notice("\u041A\u043E\u043D\u0444\u0438\u0433 Cursor \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D");
@@ -1350,6 +1343,7 @@ var ScopesModal = class extends import_obsidian7.Modal {
       })
     ).addButton(
       (btn) => btn.setButtonText("Regenerate token").onClick(async () => {
+        await this.flushScope(scope.id);
         await this.client.regenerateToken(scope.id);
         await this.reload();
         this.renderList();
@@ -1357,22 +1351,25 @@ var ScopesModal = class extends import_obsidian7.Modal {
       })
     ).addButton(
       (btn) => btn.setButtonText("Delete").setWarning().onClick(async () => {
+        await this.flushScope(scope.id);
+        this.pending.delete(scope.id);
         await this.client.deleteScope(scope.id);
         await this.reload();
         this.renderList();
       })
     );
   }
-  countFilesForInclude(include) {
+  countFilesForInclude(include, exclude) {
     if (!include.length) return 0;
-    if (include.includes("**/*.md")) return this.markdownPaths.length;
     let count = 0;
     for (const file of this.markdownPaths) {
-      if (include.some((p) => this.fileMatchesGlob(file, p))) count++;
+      if (include.some((p) => this.fileMatchesGlob(file, p)) && !exclude.some((p) => this.fileMatchesGlob(file, p))) count++;
     }
     return count;
   }
   fileMatchesGlob(file, pattern) {
+    if (pattern === "**/*.md") return file.endsWith(".md");
+    if (pattern !== "*.md" && pattern.endsWith("/*.md") && !pattern.endsWith("/**/*.md")) return file.slice(0, file.lastIndexOf("/")) === pattern.slice(0, -5);
     if (pattern === "*.md") return !file.includes("/");
     if (pattern.endsWith("/**")) {
       const prefix = pattern.slice(0, -3);
@@ -1392,9 +1389,21 @@ var ScopesModal = class extends import_obsidian7.Modal {
     await this.saveScope(scope);
   }
   async saveScope(scope) {
-    await this.client.upsertScope(scope);
+    const previous = this.saves.get(scope.id) ?? Promise.resolve();
+    const payload = { ...scope, token: void 0 };
+    const save = previous.catch(() => {
+    }).then(async () => {
+      await this.client.upsertScope(payload);
+    });
+    this.saves.set(scope.id, save);
+    await save;
+  }
+  async flushScope(id) {
+    await this.pending.get(id)?.();
+    await this.saves.get(id);
   }
   onClose() {
+    for (const id of this.pending.keys()) void this.flushScope(id).catch((e) => new import_obsidian7.Notice(`Scope save failed: ${e}`));
     this.contentEl.empty();
   }
 };
@@ -1760,6 +1769,7 @@ var ObsidianContextPlugin = class extends import_obsidian11.Plugin {
     }
     const sidecar = this.ensureSidecar();
     await sidecar.forceStopForRestart();
+    this.sidecar = null;
     this.client = null;
     this.runtime = null;
     await this.startSidecar();

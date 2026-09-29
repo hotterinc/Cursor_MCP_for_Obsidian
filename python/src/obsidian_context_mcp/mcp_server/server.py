@@ -9,10 +9,20 @@ from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import GetPromptResult, Prompt, PromptMessage, Resource, TextContent, Tool
+from mcp.types import (
+    CallToolResult,
+    GetPromptResult,
+    Prompt,
+    PromptMessage,
+    Resource,
+    TextContent,
+    Tool,
+)
+from pydantic import AnyUrl
 
 from obsidian_context_mcp.core.logging import get_logger, setup_logging
 from obsidian_context_mcp.mcp_server import prompts, resources, tools
+from obsidian_context_mcp.mcp_server.context import project_root_override
 from obsidian_context_mcp.mcp_server.tool_definitions import TOOL_DEFINITIONS
 
 logger = get_logger()
@@ -36,12 +46,16 @@ TOOL_HANDLERS = {
 }
 
 
+async def _await_handler(handler: Callable[..., Awaitable[Any]], args: dict[str, Any]) -> Any:
+    return await handler(args)
+
+
 def _run_tool_handler(handler: Callable[..., Awaitable[Any]], args: dict[str, Any]) -> Any:
     """Run tool handler off the MCP event loop (embedding/search can block for minutes)."""
-    return asyncio.run(handler(args))
+    return asyncio.run(_await_handler(handler, args))
 
 
-@server.list_tools()
+@server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]
 async def list_tools() -> list[Tool]:
     return [
         Tool(name=spec["name"], description=spec["description"], inputSchema=spec["inputSchema"])
@@ -49,37 +63,37 @@ async def list_tools() -> list[Tool]:
     ]
 
 
-@server.call_tool()
-async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
+@server.call_tool()  # type: ignore[untyped-decorator]
+async def call_tool(name: str, arguments: dict[str, Any] | None) -> CallToolResult:
     args = arguments or {}
     handler = TOOL_HANDLERS.get(name)
     if not handler:
-        return [TextContent(type="text", text=json.dumps({"error": f"unknown tool: {name}"}))]
+        return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps({"error": f"unknown tool: {name}"}))])
     try:
         result = await asyncio.to_thread(_run_tool_handler, handler, args)
-        return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))])
     except Exception as exc:
         logger.exception("Tool error: {}", name)
-        return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
+        return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps({"error": str(exc)}))])
 
 
-@server.list_resources()
+@server.list_resources()  # type: ignore[no-untyped-call, untyped-decorator]
 async def list_resources() -> list[Resource]:
     return [
         Resource(
-            uri="obsidian-context://project/current/status",
+            uri=AnyUrl("obsidian-context://project/current/status"),
             name="Project Status",
             description="JSON snapshot: configured flag, vault path, index readiness for the active project.",
             mimeType="application/json",
         ),
         Resource(
-            uri="obsidian-context://project/current/config",
+            uri=AnyUrl("obsidian-context://project/current/config"),
             name="Project Config",
             description="Full project.json settings: vault, include/exclude globs, write access, embeddings.",
             mimeType="application/json",
         ),
         Resource(
-            uri="obsidian-context://project/current/index-stats",
+            uri=AnyUrl("obsidian-context://project/current/index-stats"),
             name="Index Stats",
             description="Indexed file and chunk counts from the local SQLite/vector store.",
             mimeType="application/json",
@@ -87,12 +101,12 @@ async def list_resources() -> list[Resource]:
     ]
 
 
-@server.read_resource()
+@server.read_resource()  # type: ignore[no-untyped-call, untyped-decorator]
 async def read_resource(uri: str) -> str:
     return await resources.read_resource(uri)
 
 
-@server.list_prompts()
+@server.list_prompts()  # type: ignore[no-untyped-call, untyped-decorator]
 async def list_prompts() -> list[Prompt]:
     return [
         Prompt(
@@ -116,7 +130,7 @@ async def list_prompts() -> list[Prompt]:
     ]
 
 
-@server.get_prompt()
+@server.get_prompt()  # type: ignore[no-untyped-call, untyped-decorator]
 async def get_prompt(name: str, arguments: dict[str, str] | None = None) -> GetPromptResult:
     content_map = {
         "use_project_docs": prompts.USE_PROJECT_DOCS,
@@ -136,5 +150,9 @@ async def run_mcp_server(project_root: str | None = None) -> None:
         logger.info("MCP server starting (project root override: {})", project_root)
     else:
         logger.info("MCP server starting in multi-project mode")
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+    root_token = project_root_override.set(project_root)
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
+    finally:
+        project_root_override.reset(root_token)

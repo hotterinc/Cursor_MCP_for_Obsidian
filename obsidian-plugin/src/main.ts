@@ -15,7 +15,7 @@ import { VaultAutoIndexer } from "./vaultAutoIndex";
 export default class ObsidianContextPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
   private sidecar: SidecarManager | null = null;
-  private client: SidecarClient | null = null;
+  client: SidecarClient | null = null;
   private runtime: VaultRuntimeInfo | null = null;
   private startPromise: Promise<void> | null = null;
   private settingTab: ObsidianContextSettingTab | null = null;
@@ -148,6 +148,7 @@ export default class ObsidianContextPlugin extends Plugin {
     }
     const sidecar = this.ensureSidecar();
     await sidecar.forceStopForRestart();
+    this.sidecar = null;
     this.client = null;
     this.runtime = null;
     await this.startSidecar();

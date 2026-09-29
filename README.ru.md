@@ -1,6 +1,6 @@
 # obsidian-context-mcp
 
-Локальный MCP-сервер для **Cursor**, который связывает текущий проект с внешним **Obsidian Vault**.  
+Локальный MCP-сервер для **Cursor и Codex**, который связывает текущий проект с внешним **Obsidian Vault**.
 Сервер индексирует Markdown-файлы, строит локальную векторную базу, предоставляет контекст агентам Cursor и поддерживает безопасное редактирование `.md`.
 
 По умолчанию проект работает полностью локально: без облачных API и без отправки содержимого документов наружу.
@@ -63,6 +63,20 @@ cp -r manifest.json main.js styles.css /path/to/vault/.obsidian/plugins/obsidian
 URL и token берутся из plugin → Access scopes → Copy JSON (порт в `runtime.json`).
 
 Первый tool в сессии: `scope_get_info`, затем `docs_get_context_pack` / `docs_search`.
+
+## Подключение Codex (локально)
+
+1. Запустите Obsidian и откройте **Access scopes** в настройках плагина. Создайте область, выберите разрешённые папки и нажмите **Copy Codex config**. Пустой выбор не даёт доступа ни к одной заметке.
+2. Добавьте скопированный TOML-фрагмент в пользовательский `~/.codex/config.toml` или конфигурацию проекта `.codex/config.toml`. Адрес содержит локальный порт работающего плагина; если он сменится после перезапуска, скопируйте фрагмент снова.
+3. Нажмите **Copy scope token** и задайте переменную окружения `OBSIDIAN_CONTEXT_SCOPE_TOKEN` перед запуском Codex. Не записывайте токен в репозиторий.
+
+```toml
+[mcp_servers.obsidian_context]
+url = "http://127.0.0.1:18432/mcp"
+bearer_token_env_var = "OBSIDIAN_CONTEXT_SCOPE_TOKEN"
+```
+
+Плагин продолжает обслуживать Cursor по `/sse`; Codex использует Streamable HTTP `/mcp`. Оба транспорта проверяют один и тот же токен области доступа. Web-версия ChatGPT здесь не настраивается: этот сервер слушает локальный HTTP и не публикует HTTPS-адрес.
 
 ## Access Scopes
 
@@ -277,4 +291,3 @@ pnpm --filter @obsidian-context/desktop lint
 ## Лицензия
 
 MIT, см. `LICENSE`.
-

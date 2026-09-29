@@ -12,7 +12,8 @@ Community plugin that hosts the vector index and MCP server inside Obsidian.
 ## Usage
 
 - **Semantic search vault** — command palette
-- **Manage Cursor access scopes** — limit which folders Cursor can access via MCP
-- **Copy JSON** — paste into Cursor MCP settings (`url` + `Authorization` header)
+- **Manage Cursor and Codex access scopes** — limit which folders Cursor can access via MCP
+- **Copy Cursor JSON** — paste into Cursor MCP settings (`/sse` URL + Authorization header)
+- **Copy Codex config** — paste TOML into Codex configuration and set `OBSIDIAN_CONTEXT_SCOPE_TOKEN` from **Copy scope token**
 
 Data directory: `.obsidian/plugins/obsidian-context-mcp/data/`

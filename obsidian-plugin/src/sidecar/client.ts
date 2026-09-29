@@ -8,10 +8,10 @@ import type {
 import type { AccessScope, IndexProgress, SearchResult, VaultRuntimeInfo, VaultStatus } from "../types";
 
 export class SidecarClient {
-  constructor(private baseUrl: string) {}
+  constructor(private baseUrl: string, private adminToken?: string) {}
 
   static fromRuntime(runtime: VaultRuntimeInfo): SidecarClient {
-    return new SidecarClient(`http://${runtime.host}:${runtime.port}`);
+    return new SidecarClient(`http://${runtime.host}:${runtime.port}`, runtime.adminToken);
   }
 
   private async request<T>(
@@ -21,7 +21,7 @@ export class SidecarClient {
     const res = await requestUrl({
       url: `${this.baseUrl}${path}`,
       method: init?.method ?? "GET",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(this.adminToken ? { Authorization: `Bearer ${this.adminToken}` } : {}) },
       body: init?.body,
       throw: false,
     });
@@ -71,7 +71,7 @@ export class SidecarClient {
   upsertScope(scope: AccessScope) {
     return this.request<AccessScope>("/api/v1/scopes", {
       method: "POST",
-      body: JSON.stringify(scope),
+      body: JSON.stringify({ ...scope, token: undefined }),
     });
   }
 
@@ -93,6 +93,14 @@ export class SidecarClient {
     return this.request<{ config: unknown; scope: AccessScope }>(
       `/api/v1/scopes/${encodeURIComponent(scopeId)}/cursor-config`
     );
+  }
+
+  codexConfig(scopeId: string) {
+    return this.request<{config: string; tokenEnvVar: string; scope: AccessScope}>(`/api/v1/scopes/${encodeURIComponent(scopeId)}/codex-config`);
+  }
+
+  scopeToken(scopeId: string) {
+    return this.request<{token: string; tokenEnvVar: string}>(`/api/v1/scopes/${encodeURIComponent(scopeId)}/token`);
   }
 
   scopePreview(scope: Partial<AccessScope>) {

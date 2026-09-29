@@ -2,7 +2,7 @@
 
 Russian documentation: [`README.ru.md`](README.ru.md)
 
-Local MCP server for **Cursor** that connects your Cursor project to an external **Obsidian** documentation vault. Indexes Markdown locally, builds a vector database, and gives Cursor agents searchable context plus safe editing of `.md` files.
+Local MCP server for **Cursor and Codex** that connects your Cursor project to an external **Obsidian** documentation vault. Indexes Markdown locally, builds a vector database, and gives Cursor agents searchable context plus safe editing of `.md` files.
 
 Everything runs **locally**. No cloud APIs by default. User Markdown never leaves the machine.
 
@@ -62,6 +62,20 @@ cp manifest.json main.js styles.css /path/to/vault/.obsidian/plugins/obsidian-co
 ```
 
 Port and token come from the plugin (Access scopes → Copy JSON). First tool in a session: `scope_get_info`, then `docs_get_context_pack` / `docs_search`.
+
+## Codex MCP setup (local)
+
+1. In Obsidian plugin settings, open **Access scopes**, create a scope and select the allowed folders. An empty selection grants no note access. Click **Copy Codex config**.
+2. Paste the TOML snippet into `~/.codex/config.toml` or a project's `.codex/config.toml`. The local port can change after a server restart; copy the updated snippet when needed.
+3. Click **Copy scope token** and set `OBSIDIAN_CONTEXT_SCOPE_TOKEN` in the environment before starting Codex. Keep the token out of your repository.
+
+```toml
+[mcp_servers.obsidian_context]
+url = "http://127.0.0.1:18432/mcp"
+bearer_token_env_var = "OBSIDIAN_CONTEXT_SCOPE_TOKEN"
+```
+
+Cursor continues using `/sse`; Codex uses Streamable HTTP `/mcp`. Both enforce the same scope token. ChatGPT web access is not configured here: the server binds to local HTTP and does not expose an HTTPS endpoint.
 
 ## Access Scopes
 
