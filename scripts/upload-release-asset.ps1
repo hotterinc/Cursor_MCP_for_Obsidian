@@ -1,10 +1,14 @@
 param(
-    [string]$Tag = "v0.2.7",
+    [string]$Tag = "",
     [string]$ZipPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+ . (Join-Path $Root "scripts/native.ps1")
+$ManifestVersion = (Get-Content (Join-Path $Root "obsidian-plugin/manifest.json") -Raw | ConvertFrom-Json).version
+if (-not $Tag) { $Tag = "v$ManifestVersion" }
+if ($Tag -ne "v$ManifestVersion") { throw "Release tag differs from manifest version" }
 if (-not $ZipPath) {
     $version = (Get-Content (Join-Path $Root "obsidian-plugin\manifest.json") -Raw | ConvertFrom-Json).version
     $ZipPath = Join-Path $Root "dist\release\obsidian-context-mcp-$version-windows-x64.zip"
@@ -22,5 +26,5 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-& $gh release upload $Tag $ZipPath --clobber
+Invoke-Native $gh @("release", "upload", $Tag, $ZipPath, "--clobber")
 Write-Host "Uploaded to $Tag : $ZipPath"

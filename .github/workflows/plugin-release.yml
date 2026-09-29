@@ -18,7 +18,10 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  source-checks:
+    uses: ./.github/workflows/checks.yml
   build:
+    needs: source-checks
     strategy:
       fail-fast: false
       matrix:
@@ -42,6 +45,16 @@ jobs:
       SKIP_PLUGIN_UI: "1"
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+
+      - name: Verify release provenance
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+        run: |
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync("obsidian-plugin/manifest.json")).version; if(process.env.RELEASE_TAG!=="v"+v) process.exit(1)'
 
       - uses: actions/setup-node@v6
         with:
@@ -55,7 +68,7 @@ jobs:
       - name: Install Node deps and build plugin UI
         run: |
           cd obsidian-plugin
-          npm install
+          npm ci
           npm run build
 
       - name: Build release zip (${{ matrix.release_platform }})
@@ -75,12 +88,44 @@ jobs:
           ls -lh dist/release/*.zip dist/release/*.zip.* 2>/dev/null || true
           du -h dist/release/obsidian-context-mcp/bin/* 2>/dev/null || true
 
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v3
+      - name: Smoke packaged binary
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            python/.venv/Scripts/python.exe scripts/smoke-sidecar.py obsidian-plugin/bin/obsidian-context-mcp.exe
+          else
+            python/.venv/bin/python scripts/smoke-sidecar.py obsidian-plugin/bin/obsidian-context-mcp
+          fi
+
+      - name: Smoke frozen vault indexing and MCP
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            python/.venv/Scripts/python.exe scripts/smoke-frozen-vault.py obsidian-plugin/bin/obsidian-context-mcp.exe
+          else
+            python/.venv/bin/python scripts/smoke-frozen-vault.py obsidian-plugin/bin/obsidian-context-mcp
+
+      - uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-          files: |
+          name: release-${{ matrix.release_platform }}
+          path: |
             dist/release/*.zip
             dist/release/*.zip.*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          fail_on_unmatched_files: true
+          files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

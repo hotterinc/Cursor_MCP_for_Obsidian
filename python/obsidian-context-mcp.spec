@@ -92,8 +92,6 @@ excludes = [
     "tensorflow",
     "jax",
     "pytest",
-    "unittest",
-    "torch.backends.cudnn",
     "torchvision",
     "torchaudio",
 ]

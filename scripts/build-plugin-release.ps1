@@ -18,18 +18,14 @@ $ZipName = "obsidian-context-mcp-$Version-$Platform.zip"
 $ZipPath = Join-Path $Dist $ZipName
 $SidecarSrc = Join-Path $PluginSrc "bin\obsidian-context-mcp.exe"
 
-Write-Host "==> Building plugin UI..."
-Push-Location $PluginSrc
-try {
-    if (Get-Command npm -ErrorAction SilentlyContinue) {
-        npm install
-        npm run build
-    } else {
-        Write-Host "npm not found - using committed main.js"
-        if (-not (Test-Path "main.js")) { throw "main.js missing and npm unavailable" }
-    }
-} finally {
-    Pop-Location
+ . (Join-Path $Root "scripts/native.ps1")
+if ($Version -ne (Get-Content $ManifestPath -Raw | ConvertFrom-Json).version) { throw "VERSION differs from plugin manifest" }
+if ($env:SKIP_PLUGIN_UI -ne "1") {
+    Push-Location $PluginSrc
+    try {
+        Invoke-Native "npm.cmd" @("ci")
+        Invoke-Native "npm.cmd" @("run", "build")
+    } finally { Pop-Location }
 }
 
 if (-not $SkipSidecar) {
@@ -56,7 +52,9 @@ $install = @"
 1. Unpack the zip.
 2. Copy folder `obsidian-context-mcp` to: `YourVault/.obsidian/plugins/`
 3. Obsidian -> Settings -> Community plugins -> enable **Obsidian Context MCP**.
-4. Plugin settings -> **Access scopes** -> create scope -> **Copy JSON** -> paste into Cursor `.cursor/mcp.json`.
+4. Plugin settings -> **Access scopes** -> create scope -> **Copy Cursor JSON** -> paste into Cursor `.cursor/mcp.json`.
+
+For local Codex MCP, use **Copy Codex config** and **Copy scope token**. Set `OBSIDIAN_CONTEXT_SCOPE_TOKEN` in the Codex environment.
 
 Windows first run: if SmartScreen blocks `obsidian-context-mcp.exe`, choose More info -> Run anyway.
 The `data/` folder (index, scopes, logs) is created on first run and is not included in the zip.
@@ -69,6 +67,7 @@ Set-Content -Path (Join-Path $Stage "INSTALL.md") -Value $install -Encoding UTF8
 Write-Host "==> Creating zip..."
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
+if ((Get-ChildItem $Stage -Recurse -File | Where-Object Length -ge 2GB)) { throw "Windows ZIP contains a file >= 2 GiB; reduce the sidecar before publishing" }
 Compress-Archive -Path $Stage -DestinationPath $ZipPath -CompressionLevel Optimal
 
 $sizeMb = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)

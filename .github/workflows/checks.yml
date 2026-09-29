@@ -1,0 +1,38 @@
+name: Checks
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main, "fix/**"]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.25.0"
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked --all-extras --group build
+        working-directory: python
+      - run: uv run --no-sync pytest tests
+        working-directory: python
+      - run: uv run --no-sync ruff check src tests
+        working-directory: python
+      - run: uv run --no-sync mypy src
+        working-directory: python
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck:desktop && pnpm build:desktop
+      - run: npm ci
+        working-directory: obsidian-plugin
+      - run: npm run typecheck && npm run build
+        working-directory: obsidian-plugin

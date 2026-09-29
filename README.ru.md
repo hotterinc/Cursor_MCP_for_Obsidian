@@ -28,15 +28,14 @@ Cursor Agent ──HTTP/SSE + scope token──► vault-server
 1. Установите Python-пакет:
 
 ```bash
-cd python && uv sync --all-extras
-pip install -e .   # или uv pip install -e .
+cd python && uv sync --locked --all-extras --group build
 ```
 
 2. Соберите plugin и скопируйте в vault:
 
 ```bash
 cd obsidian-plugin
-npm install && npm run build
+npm ci && npm run build
 cp -r manifest.json main.js styles.css /path/to/vault/.obsidian/plugins/obsidian-context-mcp/
 ```
 

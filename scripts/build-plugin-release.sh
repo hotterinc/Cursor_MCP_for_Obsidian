@@ -16,6 +16,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_SRC="$ROOT/obsidian-plugin"
 VERSION="${VERSION:-$(python3 -c "import json; print(json.load(open('$PLUGIN_SRC/manifest.json'))['version'])")}"
+MANIFEST_VERSION="$(node -p "require(process.argv[1]).version" "$PLUGIN_SRC/manifest.json")"
+[[ "$VERSION" == "$MANIFEST_VERSION" ]] || { echo "VERSION differs from plugin manifest" >&2; exit 1; }
 DIST="$ROOT/dist/release"
 STAGE="$DIST/obsidian-context-mcp"
 
@@ -45,7 +47,7 @@ ZIP_PATH="$DIST/$ZIP_NAME"
 echo "==> Building plugin UI..."
 cd "$PLUGIN_SRC"
 if [[ "${SKIP_PLUGIN_UI:-}" != "1" ]]; then
-  npm install
+  npm ci
   npm run build
 fi
 
@@ -90,7 +92,7 @@ cat > "$STAGE/INSTALL.md" <<EOF
 2. Скопируйте папку \`obsidian-context-mcp\` в:
    \`ВашVault/.obsidian/plugins/\`
 3. Obsidian → Settings → Community plugins → включите **Obsidian Context MCP**.
-4. Settings плагина → **Access scopes** → создайте scope → **Copy JSON** → вставьте в Cursor \`.cursor/mcp.json\`.
+4. Settings плагина → **Access scopes** → создайте scope → **Copy Cursor JSON** → вставьте в Cursor \`.cursor/mcp.json\`.
 
 ${PLATFORM_NOTE}
 
