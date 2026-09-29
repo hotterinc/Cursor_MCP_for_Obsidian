@@ -1334,7 +1334,7 @@ var ScopesModal = class extends import_obsidian7.Modal {
     });
     updatePreview();
     new import_obsidian7.Setting(block).setName("Scope ID").setDesc(scope.id).addText((t) => t.setValue(scope.id).setDisabled(true));
-    new import_obsidian7.Setting(block).setName("Codex MCP").addButton((btn) => btn.setButtonText("Copy Codex config").onClick(async () => {
+    const codexSetting = new import_obsidian7.Setting(block).setName("Codex MCP").setDesc("ChatGPT \u2192 Codex \u2192 Local: \u0432\u0441\u0442\u0430\u0432\u044C\u0442\u0435 TOML \u0432 config.toml, \u0437\u0430\u0434\u0430\u0439\u0442\u0435 \u0442\u043E\u043A\u0435\u043D \u0432 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u0441\u0440\u0435\u0434\u044B \u0438 \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 ChatGPT. \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430: /mcp.").addButton((btn) => btn.setButtonText("Copy Codex config").onClick(async () => {
       try {
         await this.flushScope(scope.id);
         const res = await this.client.codexConfig(scope.id);
@@ -1352,8 +1352,7 @@ var ScopesModal = class extends import_obsidian7.Modal {
       } catch (e) {
         new import_obsidian7.Notice(String(e));
       }
-    }));
-    const setupSetting = new import_obsidian7.Setting(block).setName("\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430 ChatGPT \u2192 Codex").setDesc("\u0412\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 TOML \u0432 config.toml, \u0437\u0430\u0434\u0430\u0439\u0442\u0435 \u0442\u043E\u043A\u0435\u043D \u0432 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0438 \u043F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 ChatGPT. \u0414\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 Codex \u2192 Local \u0438 \u0432\u0432\u0435\u0434\u0438\u0442\u0435 /mcp.").addButton((btn) => btn.setButtonText("\u041E\u0442\u043A\u0440\u044B\u0442\u044C config.toml").onClick(async () => {
+    })).addButton((btn) => btn.setButtonText("Open config.toml").onClick(async () => {
       try {
         const error = await openCodexConfig();
         if (error) new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E: ${error}`);
@@ -1361,8 +1360,9 @@ var ScopesModal = class extends import_obsidian7.Modal {
         new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E: ${e}`);
       }
     }));
+    codexSetting.settingEl.addClass("ocm-codex-setting");
     if ((0, import_os2.platform)() === "win32") {
-      setupSetting.addButton((btn) => btn.setButtonText("\u041F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0435 \u0441\u0440\u0435\u0434\u044B").onClick(() => {
+      codexSetting.addButton((btn) => btn.setButtonText("Open env vars").onClick(() => {
         try {
           openEnvironmentVariables((error) => new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0435 \u0441\u0440\u0435\u0434\u044B: ${error}`));
         } catch (e) {

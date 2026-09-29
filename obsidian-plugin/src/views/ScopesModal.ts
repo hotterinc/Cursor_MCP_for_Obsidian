@@ -163,8 +163,9 @@ export class ScopesModal extends Modal {
       .setDesc(scope.id)
       .addText((t) => t.setValue(scope.id).setDisabled(true));
 
-    new Setting(block)
+    const codexSetting = new Setting(block)
       .setName("Codex MCP")
+      .setDesc("ChatGPT → Codex → Local: вставьте TOML в config.toml, задайте токен в переменных среды и перезапустите ChatGPT. Проверка: /mcp.")
       .addButton(btn => btn.setButtonText("Copy Codex config").onClick(async () => {
         try {
           await this.flushScope(scope.id);
@@ -180,19 +181,16 @@ export class ScopesModal extends Modal {
           await navigator.clipboard.writeText(res.token);
           new Notice(`Токен скопирован: задайте ${res.tokenEnvVar} перед запуском Codex`);
         } catch(e) { new Notice(String(e)); }
-      }));
-
-    const setupSetting = new Setting(block)
-      .setName("Настройка ChatGPT → Codex")
-      .setDesc("Вставьте скопированный TOML в config.toml, задайте токен в переменных пользователя и полностью перезапустите ChatGPT. Для проверки выберите Codex → Local и введите /mcp.")
-      .addButton(btn => btn.setButtonText("Открыть config.toml").onClick(async () => {
+      }))
+      .addButton(btn => btn.setButtonText("Open config.toml").onClick(async () => {
         try {
           const error = await openCodexConfig();
           if (error) new Notice(`Не удалось открыть конфигурацию: ${error}`);
         } catch (e) { new Notice(`Не удалось открыть конфигурацию: ${e}`); }
       }));
+    codexSetting.settingEl.addClass("ocm-codex-setting");
     if (platform() === "win32") {
-      setupSetting.addButton(btn => btn.setButtonText("Переменные среды").onClick(() => {
+      codexSetting.addButton(btn => btn.setButtonText("Open env vars").onClick(() => {
         try {
           openEnvironmentVariables(error => new Notice(`Не удалось открыть переменные среды: ${error}`));
         } catch (e) { new Notice(`Не удалось открыть переменные среды: ${e}`); }

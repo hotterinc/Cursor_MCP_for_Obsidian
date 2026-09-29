@@ -3,6 +3,7 @@
 .ocm-search-item { padding: 8px 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; }
 .ocm-search-item:hover { background: var(--background-modifier-hover); }
 .ocm-scope-block { margin: 16px 0; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; }
+.ocm-codex-setting .setting-item-control { flex-wrap: wrap; justify-content: flex-end; }
 .modal.ocm-scopes-modal {
   width: min(920px, 94vw) !important;
   max-width: 94vw;
