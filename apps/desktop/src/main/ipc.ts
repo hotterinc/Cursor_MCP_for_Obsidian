@@ -198,7 +198,7 @@ export function registerIpcHandlers(): void {
         vaultPath: null,
         writeAccess: false,
         backupBeforeEdit: true,
-        embeddingProvider: 'sentence-transformers',
+        embeddingProvider: 'onnx',
         embeddingModel: 'intfloat/multilingual-e5-small',
         include: ['**/*.md'],
         exclude: ['.obsidian/**', '.git/**', 'node_modules/**', '.trash/**', 'templates/**'],

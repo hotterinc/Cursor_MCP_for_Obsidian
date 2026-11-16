@@ -43,7 +43,7 @@ export function SettingsPage() {
         </Btn>
       </div>
       <p className="text-xs text-slate-500">
-        First use of sentence-transformers will download the embedding model locally. No document content is sent externally.
+        First indexing downloads the embedding model (~120 MB) once. No document content is sent externally.
       </p>
     </div>
   )

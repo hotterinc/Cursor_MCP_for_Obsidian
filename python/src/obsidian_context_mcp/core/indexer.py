@@ -22,11 +22,14 @@ from obsidian_context_mcp.core.vault_context import VaultContext
 from obsidian_context_mcp.core.vault_paths import get_vault_chroma_path
 from obsidian_context_mcp.core.vector_store import create_vector_store, create_vector_store_at
 from obsidian_context_mcp.core.work_context import WorkContext
+from obsidian_context_mcp.shared.constants import CHUNKER_VERSION
 from obsidian_context_mcp.shared.types import ChunkRecord, IndexMode, IndexProgress, JobStatus
 
 ProgressCallback = Callable[[IndexProgress], None]
 
 ContextLike = ProjectContext | VaultContext | WorkContext
+
+INDEX_FINGERPRINT_KEY = "index_fingerprint"
 
 
 def _normalize_ctx(ctx: ContextLike) -> WorkContext:
@@ -55,6 +58,17 @@ class Indexer:
         )
         self._cancel_flag = False
         self._current_job_id: str | None = None
+
+    @property
+    def index_fingerprint(self) -> str:
+        return f"{self.embedder.fingerprint}|chunker-v{CHUNKER_VERSION}"
+
+    def needs_rebuild(self) -> bool:
+        """True when stored chunks/vectors come from another model or chunker version."""
+        stored = self.db.get_meta(INDEX_FINGERPRINT_KEY)
+        if stored is None:
+            return self.db.count_files() > 0
+        return stored != self.index_fingerprint
 
     def cancel(self) -> None:
         self._cancel_flag = True
@@ -95,6 +109,8 @@ class Indexer:
             note,
             project_id=self.work.context_id,
             vault_real_path=self.work.vault_real_path,
+            token_counter=self.embedder.count_tokens,
+            max_input_tokens=self.embedder.max_input_tokens,
         )
         new_by_index = {c.chunk_index: c for c in new_chunks}
 
@@ -188,10 +204,19 @@ class Indexer:
         self.db.create_index_job(job_id, self.work.context_id, mode.value)
 
         with INDEX_SERIAL_LOCK:
+            if mode == IndexMode.INCREMENTAL and self.needs_rebuild():
+                logger.info(
+                    "Index was built with {}, current is {}; rebuilding",
+                    self.db.get_meta(INDEX_FINGERPRINT_KEY) or "an older version",
+                    self.index_fingerprint,
+                )
+                mode = IndexMode.FULL
             if mode == IndexMode.FULL:
                 with ProjectLock(self.work.context_id, "index", timeout=5):
                     self.db.reset_all()
                     self.vector_store.reset_project(self.work.context_id)
+            # Interrupted rebuilds resume incrementally: unindexed files are still missing.
+            self.db.set_meta(INDEX_FINGERPRINT_KEY, self.index_fingerprint)
 
             vault_root = Path(self.work.vault_real_path)
             md_files = scan_markdown_files(

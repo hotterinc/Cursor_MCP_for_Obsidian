@@ -3,7 +3,7 @@
 
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules
 
-block_torch_cuda = (
+block_cuda = (
     "cuda",
     "cudnn",
     "nvidia",
@@ -19,7 +19,7 @@ def _filter_cuda_binaries(entries: list) -> list:
     return [
         entry
         for entry in entries
-        if not any(token in entry[0].lower() for token in block_torch_cuda)
+        if not any(token in entry[0].lower() for token in block_cuda)
     ]
 
 
@@ -43,14 +43,9 @@ hiddenimports = [
     "numpy.linalg._umath_linalg",
     "numpy.core._multiarray_umath",
     "llama_cpp",
-    "torch",
-    "sentence_transformers",
-    "transformers",
-    "safetensors",
-    # CPU wheels ship these stubs; transformers/sentence-transformers import them.
-    "torch.cuda",
-    "torch.backends.cuda",
-    "torch.distributed",
+    "onnxruntime",
+    "sentencepiece",
+    "huggingface_hub",
 ]
 
 hiddenimports += collect_submodules("obsidian_context_mcp")
@@ -64,11 +59,8 @@ for pkg in (
     "chromadb_rust_bindings",
     "tokenizers",
     "onnxruntime",
+    "sentencepiece",
     "llama_cpp",
-    "torch",
-    "sentence_transformers",
-    "transformers",
-    "safetensors",
 ):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += _filter_test_assets(pkg_datas)
@@ -77,7 +69,6 @@ for pkg in (
 
 binaries += _filter_cuda_binaries(collect_dynamic_libs("numpy"))
 binaries += _filter_cuda_binaries(collect_dynamic_libs("llama_cpp"))
-binaries += _filter_cuda_binaries(collect_dynamic_libs("torch"))
 
 binaries = _filter_cuda_binaries(binaries)
 datas = _filter_test_assets(datas)
@@ -92,8 +83,12 @@ excludes = [
     "tensorflow",
     "jax",
     "pytest",
+    # Not used at runtime; keep them out even if a dependency pulls them in.
+    "torch",
     "torchvision",
     "torchaudio",
+    "transformers",
+    "sentence_transformers",
 ]
 
 a = Analysis(

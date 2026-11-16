@@ -163,3 +163,39 @@ def test_incremental_rechecks_boundary_before_unchanged_skip(configured_ctx, tmp
     assert progress.files_failed == 1
     assert progress.files_skipped == 0
     assert progress.status.value == "failed"
+
+
+def test_index_rebuilds_when_embedding_fingerprint_changes(configured_ctx, monkeypatch):
+    from obsidian_context_mcp.core.indexer import INDEX_FINGERPRINT_KEY
+
+    monkeypatch.setattr(
+        "obsidian_context_mcp.core.indexer.create_embedding_provider",
+        lambda config, pid: FakeEmbeddingProvider(),
+    )
+    first = Indexer(configured_ctx)
+    first.run(IndexMode.INCREMENTAL)
+    assert first.db.get_meta(INDEX_FINGERPRINT_KEY) == first.index_fingerprint
+
+    unchanged = Indexer(configured_ctx).run(IndexMode.INCREMENTAL)
+    assert unchanged.files_indexed == 0
+
+    first.db.set_meta(INDEX_FINGERPRINT_KEY, "sentence-transformers:old")
+    rebuilt_indexer = Indexer(configured_ctx)
+    assert rebuilt_indexer.needs_rebuild()
+    rebuilt = rebuilt_indexer.run(IndexMode.INCREMENTAL)
+    assert rebuilt.files_indexed >= 1
+    assert rebuilt_indexer.db.get_meta(INDEX_FINGERPRINT_KEY) == rebuilt_indexer.index_fingerprint
+
+
+def test_legacy_index_without_fingerprint_is_rebuilt(configured_ctx, monkeypatch):
+    from obsidian_context_mcp.core.indexer import INDEX_FINGERPRINT_KEY
+
+    monkeypatch.setattr(
+        "obsidian_context_mcp.core.indexer.create_embedding_provider",
+        lambda config, pid: FakeEmbeddingProvider(),
+    )
+    indexer = Indexer(configured_ctx)
+    indexer.run(IndexMode.INCREMENTAL)
+    indexer.db.conn.execute("DELETE FROM meta WHERE key = ?", (INDEX_FINGERPRINT_KEY,))
+    indexer.db.conn.commit()
+    assert Indexer(configured_ctx).needs_rebuild()

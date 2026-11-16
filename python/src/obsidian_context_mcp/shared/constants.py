@@ -10,7 +10,7 @@ DEFAULT_EXCLUDE = [
     "templates/**",
 ]
 
-DEFAULT_EMBEDDING_PROVIDER = "sentence-transformers"
+DEFAULT_EMBEDDING_PROVIDER = "onnx"
 DEFAULT_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
 PROJECT_CONFIG_VERSION = 1
@@ -22,10 +22,14 @@ BLOCKED_WRITE_PREFIXES = (
     ".trash/",
 )
 
-CHUNK_TARGET_TOKENS = 1000
-CHUNK_OVERLAP_TOKENS = 150
-CHUNK_MIN_TOKENS = 800
-CHUNK_MAX_TOKENS = 1200
+# Measured in embedding-model tokens. multilingual-e5-small reads 512 tokens and
+# silently drops the rest, so a chunk must fit the window with some margin.
+CHUNK_TARGET_TOKENS = 380
+CHUNK_OVERLAP_TOKENS = 48
+CHUNK_MAX_TOKENS = 480
+CHUNK_WINDOW_MARGIN_TOKENS = 16
+# Bump when chunk boundaries change so existing indexes are rebuilt.
+CHUNKER_VERSION = 2
 
 WATCHER_DEBOUNCE_MS_MIN = 500
 WATCHER_DEBOUNCE_MS_MAX = 1500

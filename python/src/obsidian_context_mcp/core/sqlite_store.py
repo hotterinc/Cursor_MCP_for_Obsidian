@@ -98,6 +98,11 @@ class SQLiteStore:
                 error TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
                 chunk_id UNINDEXED,
                 text,
@@ -277,6 +282,22 @@ class SQLiteStore:
             (chunk.id, chunk.text, title, heading_path, " ".join(tags)),
         )
         self.conn.commit()
+
+    def get_meta(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return str(row[0]) if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO meta(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        self.conn.commit()
+
+    def count_files(self) -> int:
+        row = self.conn.execute("SELECT COUNT(*) FROM files").fetchone()
+        return int(row[0])
 
     def count_chunks(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) FROM chunks").fetchone()

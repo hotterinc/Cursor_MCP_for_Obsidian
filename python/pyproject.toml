@@ -11,7 +11,10 @@ dependencies = [
     "pydantic>=2.0",
     "watchdog>=4.0",
     "chromadb>=0.5.0",
-    "sentence-transformers>=3.0.0",
+    "onnxruntime>=1.20",
+    "sentencepiece>=0.2.1",
+    "huggingface-hub>=0.24",
+    "numpy>=1.26",
     "markdown-it-py>=3.0",
     "python-frontmatter>=1.1.0",
     "platformdirs>=4.0",
@@ -60,7 +63,7 @@ warn_return_any = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["chromadb.*", "sentence_transformers.*", "watchdog.*", "frontmatter.*"]
+module = ["chromadb.*", "onnxruntime.*", "sentencepiece.*", "watchdog.*", "frontmatter.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -69,28 +72,18 @@ asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.uv]
-# Intel Mac: onnxruntime >=1.24 and recent torch ship no x86_64 wheels.
+# Intel Mac: onnxruntime >=1.24 and sentencepiece >=0.2.3 ship no x86_64 wheels.
 override-dependencies = [
-  "transformers==4.49.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
-  "transformers>=4.50; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+  "sentencepiece>=0.2.1; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+  "sentencepiece==0.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
   "numpy>=2,<2.5; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-  "torch==2.12.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
   "onnxruntime>=1.24; sys_platform != 'darwin' or platform_machine != 'x86_64'",
   "onnxruntime==1.23.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
   "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
-  "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
 [tool.uv.sources]
-torch = [
-  { index = "pytorch-cpu", marker = "sys_platform != 'darwin'" },
-]
 llama-cpp-python = { index = "llama-cpu", marker = "sys_platform != 'darwin'" }
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
 
 [[tool.uv.index]]
 name = "llama-cpu"

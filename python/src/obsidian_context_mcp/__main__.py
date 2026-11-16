@@ -26,8 +26,7 @@ if __name__ == "__main__":
         import importlib
         import json
 
-        modules = ["torch", "torch.backends.cudnn", "sentence_transformers",
-                   "chromadb", "onnxruntime", "llama_cpp"]
+        modules = ["onnxruntime", "sentencepiece", "huggingface_hub", "chromadb", "llama_cpp"]
         for module in modules:
             importlib.import_module(module)
         print(json.dumps({"runtime_imports": modules}))

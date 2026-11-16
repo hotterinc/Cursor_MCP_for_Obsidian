@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import safetensors  # noqa: F401
-import sentence_transformers  # noqa: F401
-import torch  # noqa: F401
-import transformers  # noqa: F401
+import huggingface_hub  # noqa: F401
+import onnxruntime  # noqa: F401
+import sentencepiece  # noqa: F401

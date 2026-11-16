@@ -63,7 +63,7 @@ class VaultConfig(BaseModel):
             "templates/**",
         ]
     )
-    embedding_provider: str = "sentence-transformers"
+    embedding_provider: str = "onnx"
     embedding_model: str = "intfloat/multilingual-e5-small"
     watcher_enabled: bool = True
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
@@ -118,7 +118,7 @@ class ProjectConfig(BaseModel):
     )
     write_access: bool = False
     backup_before_edit: bool = True
-    embedding_provider: str = "sentence-transformers"
+    embedding_provider: str = "onnx"
     embedding_model: str = "intfloat/multilingual-e5-small"
     watcher_enabled: bool = True
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")

@@ -164,7 +164,7 @@ def handle_settings_get(params: dict[str, Any]) -> dict[str, Any]:
         "vaultPath": config.vault_path if config else None,
         "writeAccess": config.write_access if config else False,
         "backupBeforeEdit": config.backup_before_edit if config else True,
-        "embeddingProvider": config.embedding_provider if config else "sentence-transformers",
+        "embeddingProvider": config.embedding_provider if config else "onnx",
         "embeddingModel": config.embedding_model if config else "intfloat/multilingual-e5-small",
         "include": config.include if config else [],
         "exclude": config.exclude if config else [],

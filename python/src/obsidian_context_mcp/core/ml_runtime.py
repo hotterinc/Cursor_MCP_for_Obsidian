@@ -1,4 +1,4 @@
-"""Process-wide settings for PyTorch / HuggingFace on Windows."""
+"""Process-wide settings for the ONNX / HuggingFace embedding runtime."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ _configured = False
 
 
 def configure_ml_runtime(*, data_dir: Path | None = None) -> None:
-    """Apply env defaults before importing torch or sentence-transformers."""
+    """Apply env defaults before importing onnxruntime or tokenizers."""
     global _configured
     if _configured:
         return
@@ -30,5 +30,4 @@ def configure_ml_runtime(*, data_dir: Path | None = None) -> None:
         cache = str(get_shared_models_cache_dir())
     os.environ.setdefault("HF_HOME", cache)
     os.environ.setdefault("HF_HUB_CACHE", cache)
-    os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", cache)
     _configured = True

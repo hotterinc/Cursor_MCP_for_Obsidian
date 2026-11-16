@@ -6,7 +6,7 @@ import os
 import sys
 
 
-def _bootstrap_cpu_torch() -> None:
+def _bootstrap_cpu_runtime() -> None:
     if not getattr(sys, "frozen", False):
         return
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
@@ -24,5 +24,5 @@ def _bootstrap_llama_cpp_lib_path() -> None:
         os.environ.setdefault("LLAMA_CPP_LIB_PATH", lib_dir)
 
 
-_bootstrap_cpu_torch()
+_bootstrap_cpu_runtime()
 _bootstrap_llama_cpp_lib_path()

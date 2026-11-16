@@ -21,7 +21,15 @@ def test_runtime_modules_are_not_excluded():
     text = (ENTRY.parents[2] / "obsidian-context-mcp.spec").read_text()
     excludes = text.split("excludes = [", 1)[1].split("]", 1)[0]
     assert '"unittest"' not in excludes
-    assert '"torch.backends.cudnn"' not in excludes
+    for module in ("onnxruntime", "sentencepiece", "huggingface_hub"):
+        assert f'"{module}"' not in excludes
+
+
+def test_torch_stack_is_not_bundled():
+    text = (ENTRY.parents[2] / "obsidian-context-mcp.spec").read_text()
+    collected = text.split("for pkg in (", 1)[1].split("):", 1)[0]
+    for module in ("torch", "sentence_transformers", "transformers"):
+        assert f'"{module}"' not in collected
 
 
 def test_native_command_failure_is_not_ignored():

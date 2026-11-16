@@ -10,5 +10,5 @@ for args, expected in [(["--help"], "Usage"), (["vault-server", "--help"], "vaul
     if result.returncode or expected not in result.stdout:
         raise SystemExit(f"Frozen smoke failed: {args}\n{result.stdout}\n{result.stderr}")
     if args == ["--runtime-smoke"]:
-        assert len(json.loads(result.stdout)["runtime_imports"]) == 6
+        assert len(json.loads(result.stdout)["runtime_imports"]) == 5
 print("Frozen CLI and native runtime imports passed")
