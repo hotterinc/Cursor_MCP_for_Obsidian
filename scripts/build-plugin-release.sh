@@ -96,6 +96,8 @@ cat > "$STAGE/INSTALL.md" <<EOF
 
 Для ChatGPT desktop → Codex → Local используйте **Copy Codex config** и **Copy scope token**. Задайте \`OBSIDIAN_CONTEXT_SCOPE_TOKEN\` в окружении локального Codex, перезапустите ChatGPT и проверьте подключение через \`/mcp\`.
 
+Для Claude Code используйте **Copy command** (user scope) или **Copy .mcp.json** (для репозитория, токен из \`OBSIDIAN_CONTEXT_SCOPE_TOKEN\`). Для Claude Desktop нажмите **Install** — плагин добавит сервер в \`claude_desktop_config.json\`, после чего перезапустите Claude Desktop.
+
 ${PLATFORM_NOTE}
 
 Папка \`data/\` (индекс, scopes, логи) создаётся автоматически при первом запуске — в архиве её нет намеренно.
