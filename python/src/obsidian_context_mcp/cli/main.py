@@ -10,7 +10,8 @@ app = typer.Typer(name="obsidian-context-mcp", no_args_is_help=True)
 
 app.command("server")(commands.server)
 app.command("vault-server")(commands.vault_server)
-app.command("cursor-proxy")(commands.cursor_proxy)
+app.command("stdio-proxy")(commands.cursor_proxy)
+app.command("cursor-proxy", hidden=True)(commands.cursor_proxy)  # old name
 app.command("gui-backend")(commands.gui_backend)
 app.command("index")(commands.index_cmd)
 app.command("doctor")(commands.doctor)

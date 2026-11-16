@@ -2,7 +2,7 @@
 
 Russian documentation: [`README.ru.md`](README.ru.md)
 
-Local MCP server for **Cursor and Codex** that connects your Cursor project to an external **Obsidian** documentation vault. Indexes Markdown locally, builds a vector database, and gives Cursor agents searchable context plus safe editing of `.md` files.
+Local MCP server for **Cursor, Codex and Claude** that connects your Cursor project to an external **Obsidian** documentation vault. Indexes Markdown locally, builds a vector database, and gives Cursor agents searchable context plus safe editing of `.md` files.
 
 Everything runs **locally**. No cloud APIs by default. User Markdown never leaves the machine.
 
@@ -75,6 +75,34 @@ bearer_token_env_var = "OBSIDIAN_CONTEXT_SCOPE_TOKEN"
 ```
 
 Cursor continues using `/sse`; Codex uses Streamable HTTP `/mcp`. Both enforce the same scope token. On upgrading from an older plugin, restart Obsidian to replace the server and create its local admin capability; if an old process cannot be verified as belonging to this vault, stop it manually before restarting. ChatGPT web access is not configured here: the server binds to local HTTP and does not expose an HTTPS endpoint.
+
+## Claude Code and Claude Desktop
+
+Both use the same Access scopes as Cursor and Codex. Open **Access scopes** in the plugin settings and pick a scope.
+
+**Claude Code (CLI).** Click **Copy command** and run it in a terminal, then check with `claude mcp list`:
+
+```bash
+claude mcp add --transport http --scope user obsidian-context http://127.0.0.1:18432/mcp --header "Authorization: Bearer ocm_..."
+```
+
+For a repository that should carry the setup, click **Copy .mcp.json** and put it in the project root. The token is read from `OBSIDIAN_CONTEXT_SCOPE_TOKEN` at startup, so the file can be committed:
+
+```json
+{
+  "mcpServers": {
+    "obsidian-context": {
+      "type": "http",
+      "url": "http://127.0.0.1:18432/mcp",
+      "headers": { "Authorization": "Bearer ${OBSIDIAN_CONTEXT_SCOPE_TOKEN}" }
+    }
+  }
+}
+```
+
+**Claude Desktop.** Desktop starts only stdio servers from `claude_desktop_config.json`, so it launches the plugin's own binary as a bridge (`obsidian-context-mcp stdio-proxy`). No Node.js is needed. Click **Install**: the entry is merged into the config (other servers stay, the previous file is kept as `.bak`), then restart Claude Desktop. **Copy config** and **Open config** are there for manual setup. The bridge reads the current port from the plugin's `runtime.json`, so a port change does not break it; Obsidian has to be running. The Desktop entry holds the scope token in its `env` block because Desktop does not see your shell environment; after **Regenerate token**, click **Install** again.
+
+The claude.ai web app and its remote connectors are not covered: they need a public HTTPS endpoint, and this server listens only on local HTTP.
 
 ## Access Scopes
 

@@ -113,6 +113,15 @@ var SidecarClient = class _SidecarClient {
   codexConfig(scopeId) {
     return this.request(`/api/v1/scopes/${encodeURIComponent(scopeId)}/codex-config`);
   }
+  claudeConfig(scopeId) {
+    return this.request(`/api/v1/scopes/${encodeURIComponent(scopeId)}/claude-config`);
+  }
+  installClaudeDesktop(scopeId) {
+    return this.request(
+      `/api/v1/scopes/${encodeURIComponent(scopeId)}/claude-desktop/install`,
+      { method: "POST" }
+    );
+  }
   scopeToken(scopeId) {
     return this.request(`/api/v1/scopes/${encodeURIComponent(scopeId)}/token`);
   }
@@ -986,16 +995,27 @@ var ObsidianContextSettingTab = class extends import_obsidian6.PluginSettingTab 
 var import_obsidian7 = require("obsidian");
 var import_os2 = require("os");
 
-// src/views/CodexSetupActions.ts
-var import_child_process2 = require("child_process");
+// src/views/ClaudeSetupActions.ts
 var import_fs = require("fs");
-var import_os = require("os");
 var import_path = require("path");
 var { shell } = require("electron");
+async function openClaudeDesktopConfig(configPath) {
+  if ((0, import_fs.existsSync)(configPath)) return shell.openPath(configPath);
+  const folder = (0, import_path.dirname)(configPath);
+  if ((0, import_fs.existsSync)(folder)) return shell.openPath(folder);
+  return `Claude Desktop \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D: \u043D\u0435\u0442 \u043F\u0430\u043F\u043A\u0438 ${folder}`;
+}
+
+// src/views/CodexSetupActions.ts
+var import_child_process2 = require("child_process");
+var import_fs2 = require("fs");
+var import_os = require("os");
+var import_path2 = require("path");
+var { shell: shell2 } = require("electron");
 async function openCodexConfig() {
-  const directory = (0, import_path.join)((0, import_os.homedir)(), ".codex");
-  const config = (0, import_path.join)(directory, "config.toml");
-  return shell.openPath((0, import_fs.existsSync)(config) ? config : directory);
+  const directory = (0, import_path2.join)((0, import_os.homedir)(), ".codex");
+  const config = (0, import_path2.join)(directory, "config.toml");
+  return shell2.openPath((0, import_fs2.existsSync)(config) ? config : directory);
 }
 function openEnvironmentVariables(onError) {
   if ((0, import_os.platform)() !== "win32") throw new Error("Available only on Windows");
@@ -1232,11 +1252,11 @@ var ScopesModal = class extends import_obsidian7.Modal {
     contentEl.addClass("ocm-scopes-modal-content");
     contentEl.createEl("h2", { text: "\u0414\u043E\u0441\u0442\u0443\u043F MCP \u043A vault" });
     contentEl.createEl("p", {
-      text: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u0434\u043B\u044F \u0447\u0442\u0435\u043D\u0438\u044F \u0438 \u0437\u0430\u043F\u0438\u0441\u0438. \u0414\u043B\u044F Cursor \u0441\u043A\u043E\u043F\u0438\u0440\u0443\u0439\u0442\u0435 JSON, \u0434\u043B\u044F \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0433\u043E Codex \u0432 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0438 ChatGPT \u2014 TOML. \u0422\u043E\u043A\u0435\u043D Codex \u0437\u0430\u0434\u0430\u0451\u0442\u0441\u044F \u0447\u0435\u0440\u0435\u0437 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u0443\u044E \u043E\u043A\u0440\u0443\u0436\u0435\u043D\u0438\u044F."
+      text: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u0434\u043B\u044F \u0447\u0442\u0435\u043D\u0438\u044F \u0438 \u0437\u0430\u043F\u0438\u0441\u0438. \u0414\u043B\u044F Cursor \u0441\u043A\u043E\u043F\u0438\u0440\u0443\u0439\u0442\u0435 JSON, \u0434\u043B\u044F Codex \u2014 TOML, \u0434\u043B\u044F Claude Code \u2014 \u043A\u043E\u043C\u0430\u043D\u0434\u0443, Claude Desktop \u043D\u0430\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043A\u043D\u043E\u043F\u043A\u043E\u0439 Install."
     });
     this.markdownPaths = this.app.vault.getMarkdownFiles().map((f) => f.path).sort();
     this.listEl = contentEl.createDiv({ cls: "ocm-scopes-list" });
-    new import_obsidian7.Setting(contentEl).setName("\u041D\u043E\u0432\u044B\u0439 scope").setDesc("\u041E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u0439 \u0442\u043E\u043A\u0435\u043D \u0434\u043B\u044F Cursor \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0433\u043E Codex \u0441 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u043C\u0438 \u043F\u0430\u043F\u043A\u0430\u043C\u0438").addButton(
+    new import_obsidian7.Setting(contentEl).setName("\u041D\u043E\u0432\u044B\u0439 scope").setDesc("\u041E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u0439 \u0442\u043E\u043A\u0435\u043D \u0434\u043B\u044F Cursor, Codex \u0438 Claude \u0441 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u043C\u0438 \u043F\u0430\u043F\u043A\u0430\u043C\u0438").addButton(
       (btn) => btn.setButtonText("\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C scope").setCta().onClick(() => {
         void this.addScope(btn);
       })
@@ -1370,6 +1390,51 @@ var ScopesModal = class extends import_obsidian7.Modal {
         }
       }));
     }
+    new import_obsidian7.Setting(block).setName("Claude Code").setDesc("\u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u043A\u043E\u043C\u0430\u043D\u0434\u0443 \u0432 \u0442\u0435\u0440\u043C\u0438\u043D\u0430\u043B\u0435, \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430: claude mcp list. \u0414\u043B\u044F .mcp.json \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u0442\u043E\u043A\u0435\u043D \u0431\u0435\u0440\u0451\u0442\u0441\u044F \u0438\u0437 OBSIDIAN_CONTEXT_SCOPE_TOKEN.").addButton((btn) => btn.setButtonText("Copy command").onClick(async () => {
+      try {
+        await this.flushScope(scope.id);
+        const res = await this.client.claudeConfig(scope.id);
+        await navigator.clipboard.writeText(res.claudeCode.command);
+        new import_obsidian7.Notice("\u041A\u043E\u043C\u0430\u043D\u0434\u0430 \u0434\u043B\u044F Claude Code \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0430");
+      } catch (e) {
+        new import_obsidian7.Notice(String(e));
+      }
+    })).addButton((btn) => btn.setButtonText("Copy .mcp.json").onClick(async () => {
+      try {
+        await this.flushScope(scope.id);
+        const res = await this.client.claudeConfig(scope.id);
+        await navigator.clipboard.writeText(JSON.stringify(res.claudeCode.projectConfig, null, 2));
+        new import_obsidian7.Notice(`\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u043E: \u0437\u0430\u0434\u0430\u0439\u0442\u0435 ${res.claudeCode.tokenEnvVar} \u043F\u0435\u0440\u0435\u0434 \u0437\u0430\u043F\u0443\u0441\u043A\u043E\u043C claude`);
+      } catch (e) {
+        new import_obsidian7.Notice(String(e));
+      }
+    }));
+    new import_obsidian7.Setting(block).setClass("ocm-codex-setting").setName("Claude Desktop").setDesc("Install \u0434\u043E\u0431\u0430\u0432\u0438\u0442 \u0441\u0435\u0440\u0432\u0435\u0440 \u0432 claude_desktop_config.json (\u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0441\u0435\u0440\u0432\u0435\u0440\u044B \u043D\u0435 \u0442\u0440\u043E\u0433\u0430\u044E\u0442\u0441\u044F, \u0441\u0442\u0430\u0440\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u0435\u0442\u0441\u044F \u0432 .bak). \u0417\u0430\u0442\u0435\u043C \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 Claude Desktop; Obsidian \u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C \u043E\u0442\u043A\u0440\u044B\u0442.").addButton((btn) => btn.setButtonText("Install").setCta().onClick(async () => {
+      try {
+        await this.flushScope(scope.id);
+        const res = await this.client.installClaudeDesktop(scope.id);
+        new import_obsidian7.Notice(res.changed ? "Claude Desktop \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D \u2014 \u043F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435" : "Claude Desktop \u0443\u0436\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E scope");
+      } catch (e) {
+        new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C Claude Desktop: ${e}`);
+      }
+    })).addButton((btn) => btn.setButtonText("Copy config").onClick(async () => {
+      try {
+        await this.flushScope(scope.id);
+        const res = await this.client.claudeConfig(scope.id);
+        await navigator.clipboard.writeText(JSON.stringify(res.claudeDesktop.config, null, 2));
+        new import_obsidian7.Notice("\u041A\u043E\u043D\u0444\u0438\u0433 Claude Desktop \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D");
+      } catch (e) {
+        new import_obsidian7.Notice(String(e));
+      }
+    })).addButton((btn) => btn.setButtonText("Open config").onClick(async () => {
+      try {
+        const res = await this.client.claudeConfig(scope.id);
+        const error = await openClaudeDesktopConfig(res.claudeDesktop.configPath);
+        if (error) new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E: ${error}`);
+      } catch (e) {
+        new import_obsidian7.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044E: ${e}`);
+      }
+    }));
     new import_obsidian7.Setting(block).setName("Cursor MCP").addButton(
       (btn) => btn.setButtonText("Copy JSON").onClick(async () => {
         try {
@@ -1387,7 +1452,7 @@ var ScopesModal = class extends import_obsidian7.Modal {
         await this.client.regenerateToken(scope.id);
         await this.reload();
         this.renderList();
-        new import_obsidian7.Notice("\u0422\u043E\u043A\u0435\u043D \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D \u2014 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433 Cursor \u0438 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u0443\u044E Codex");
+        new import_obsidian7.Notice("\u0422\u043E\u043A\u0435\u043D \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D \u2014 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u043E\u043D\u0444\u0438\u0433\u0438 Cursor \u0438 Claude \u0438 \u043F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u0443\u044E Codex/Claude Code");
       })
     ).addButton(
       (btn) => btn.setButtonText("Delete").setWarning().onClick(async () => {

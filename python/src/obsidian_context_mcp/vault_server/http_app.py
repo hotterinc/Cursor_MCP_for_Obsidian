@@ -184,6 +184,12 @@ def create_http_app(
     routes = [
         Route("/mcp", endpoint=HttpEndpoint(), methods=["GET", "POST", "DELETE"]),
         Route("/api/v1/scopes/{scope_id}/codex-config", admin.codex_config, methods=["GET"]),
+        Route("/api/v1/scopes/{scope_id}/claude-config", admin.claude_config, methods=["GET"]),
+        Route(
+            "/api/v1/scopes/{scope_id}/claude-desktop/install",
+            admin.install_claude_desktop,
+            methods=["POST"],
+        ),
         Route("/api/v1/scopes/{scope_id}/token", admin.scope_token, methods=["GET"]),
         Route("/health", admin.health, methods=["GET"]),
         Route("/api/v1/status", admin.status, methods=["GET"]),

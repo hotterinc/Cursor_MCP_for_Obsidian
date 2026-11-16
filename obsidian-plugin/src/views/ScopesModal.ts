@@ -1,5 +1,6 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { platform } from "os";
+import { openClaudeDesktopConfig } from "./ClaudeSetupActions";
 import { openCodexConfig, openEnvironmentVariables } from "./CodexSetupActions";
 import { listVaultFolderNodes } from "../folderScope";
 import type { SidecarClient } from "../sidecar/client";
@@ -26,7 +27,7 @@ export class ScopesModal extends Modal {
     contentEl.addClass("ocm-scopes-modal-content");
     contentEl.createEl("h2", { text: "Доступ MCP к vault" });
     contentEl.createEl("p", {
-      text: "Выберите папки для чтения и записи. Для Cursor скопируйте JSON, для локального Codex в приложении ChatGPT — TOML. Токен Codex задаётся через переменную окружения.",
+      text: "Выберите папки для чтения и записи. Для Cursor скопируйте JSON, для Codex — TOML, для Claude Code — команду, Claude Desktop настраивается кнопкой Install.",
     });
 
     this.markdownPaths = this.app.vault
@@ -38,7 +39,7 @@ export class ScopesModal extends Modal {
 
     new Setting(contentEl)
       .setName("Новый scope")
-      .setDesc("Отдельный токен для Cursor и локального Codex с выбранными папками")
+      .setDesc("Отдельный токен для Cursor, Codex и Claude с выбранными папками")
       .addButton((btn) =>
         btn.setButtonText("Добавить scope").setCta().onClick(() => {
           void this.addScope(btn);
@@ -198,6 +199,55 @@ export class ScopesModal extends Modal {
     }
 
     new Setting(block)
+      .setName("Claude Code")
+      .setDesc("Выполните команду в терминале, проверка: claude mcp list. Для .mcp.json проекта токен берётся из OBSIDIAN_CONTEXT_SCOPE_TOKEN.")
+      .addButton(btn => btn.setButtonText("Copy command").onClick(async () => {
+        try {
+          await this.flushScope(scope.id);
+          const res = await this.client.claudeConfig(scope.id);
+          await navigator.clipboard.writeText(res.claudeCode.command);
+          new Notice("Команда для Claude Code скопирована");
+        } catch (e) { new Notice(String(e)); }
+      }))
+      .addButton(btn => btn.setButtonText("Copy .mcp.json").onClick(async () => {
+        try {
+          await this.flushScope(scope.id);
+          const res = await this.client.claudeConfig(scope.id);
+          await navigator.clipboard.writeText(JSON.stringify(res.claudeCode.projectConfig, null, 2));
+          new Notice(`Скопировано: задайте ${res.claudeCode.tokenEnvVar} перед запуском claude`);
+        } catch (e) { new Notice(String(e)); }
+      }));
+
+    new Setting(block)
+      .setClass("ocm-codex-setting")
+      .setName("Claude Desktop")
+      .setDesc("Install добавит сервер в claude_desktop_config.json (остальные серверы не трогаются, старая версия сохраняется в .bak). Затем перезапустите Claude Desktop; Obsidian должен быть открыт.")
+      .addButton(btn => btn.setButtonText("Install").setCta().onClick(async () => {
+        try {
+          await this.flushScope(scope.id);
+          const res = await this.client.installClaudeDesktop(scope.id);
+          new Notice(res.changed
+            ? "Claude Desktop настроен — перезапустите приложение"
+            : "Claude Desktop уже настроен для этого scope");
+        } catch (e) { new Notice(`Не удалось настроить Claude Desktop: ${e}`); }
+      }))
+      .addButton(btn => btn.setButtonText("Copy config").onClick(async () => {
+        try {
+          await this.flushScope(scope.id);
+          const res = await this.client.claudeConfig(scope.id);
+          await navigator.clipboard.writeText(JSON.stringify(res.claudeDesktop.config, null, 2));
+          new Notice("Конфиг Claude Desktop скопирован");
+        } catch (e) { new Notice(String(e)); }
+      }))
+      .addButton(btn => btn.setButtonText("Open config").onClick(async () => {
+        try {
+          const res = await this.client.claudeConfig(scope.id);
+          const error = await openClaudeDesktopConfig(res.claudeDesktop.configPath);
+          if (error) new Notice(`Не удалось открыть конфигурацию: ${error}`);
+        } catch (e) { new Notice(`Не удалось открыть конфигурацию: ${e}`); }
+      }));
+
+    new Setting(block)
       .setName("Cursor MCP")
       .addButton((btn) =>
         btn.setButtonText("Copy JSON").onClick(async () => {
@@ -217,7 +267,7 @@ export class ScopesModal extends Modal {
           await this.client.regenerateToken(scope.id);
           await this.reload();
           this.renderList();
-          new Notice("Токен обновлён — обновите конфиг Cursor и переменную Codex");
+          new Notice("Токен обновлён — обновите конфиги Cursor и Claude и переменную Codex/Claude Code");
         })
       )
       .addButton((btn) =>

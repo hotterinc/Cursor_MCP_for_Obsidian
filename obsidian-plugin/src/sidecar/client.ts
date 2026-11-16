@@ -99,6 +99,21 @@ export class SidecarClient {
     return this.request<{config: string; tokenEnvVar: string; scope: AccessScope}>(`/api/v1/scopes/${encodeURIComponent(scopeId)}/codex-config`);
   }
 
+  claudeConfig(scopeId: string) {
+    return this.request<{
+      claudeCode: { command: string; projectConfig: unknown; tokenEnvVar: string };
+      claudeDesktop: { config: unknown; configPath: string };
+      scope: AccessScope;
+    }>(`/api/v1/scopes/${encodeURIComponent(scopeId)}/claude-config`);
+  }
+
+  installClaudeDesktop(scopeId: string) {
+    return this.request<{ configPath: string; changed: boolean }>(
+      `/api/v1/scopes/${encodeURIComponent(scopeId)}/claude-desktop/install`,
+      { method: "POST" }
+    );
+  }
+
   scopeToken(scopeId: string) {
     return this.request<{token: string; tokenEnvVar: string}>(`/api/v1/scopes/${encodeURIComponent(scopeId)}/token`);
   }

@@ -31,6 +31,13 @@ from obsidian_context_mcp.core.sqlite_store import SQLiteStore
 from obsidian_context_mcp.core.vault import scan_markdown_files
 from obsidian_context_mcp.core.vault_context import VaultContext
 from obsidian_context_mcp.shared.types import AccessScope, IndexMode
+from obsidian_context_mcp.vault_server.client_configs import (
+    DesktopConfigError,
+    claude_code_configs,
+    claude_desktop_config_path,
+    claude_desktop_entry,
+    install_claude_desktop_entry,
+)
 from obsidian_context_mcp.vault_server.index_queue import VaultIndexQueue
 
 
@@ -176,6 +183,41 @@ class AdminApi:
         )
         return JSONResponse({"config": config, "tokenEnvVar": "OBSIDIAN_CONTEXT_SCOPE_TOKEN",
                              "scope": scope.model_dump(by_alias=True, exclude={"token"})})
+
+    def _runtime_port(self) -> int | None:
+        runtime_path = self.vault_ctx.data_dir / "runtime.json"
+        if not runtime_path.exists():
+            return None
+        return int(json.loads(runtime_path.read_text(encoding="utf-8"))["port"])
+
+    async def claude_config(self, request: Request) -> Response:
+        scope = self.vault_ctx.scope_store.get_by_id(request.path_params["scope_id"])
+        if scope is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        port = self._runtime_port()
+        if port is None:
+            return JSONResponse({"error": "Server runtime is unavailable"}, status_code=503)
+        entry = claude_desktop_entry(self.vault_ctx.data_dir, scope.token)
+        return JSONResponse({
+            "claudeCode": claude_code_configs(port, scope.token),
+            "claudeDesktop": {
+                "config": {"mcpServers": {"obsidian-context": entry}},
+                "configPath": str(claude_desktop_config_path()),
+            },
+            "scope": scope.model_dump(by_alias=True, exclude={"token"}),
+        })
+
+    async def install_claude_desktop(self, request: Request) -> Response:
+        scope = self.vault_ctx.scope_store.get_by_id(request.path_params["scope_id"])
+        if scope is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        path = claude_desktop_config_path()
+        entry = claude_desktop_entry(self.vault_ctx.data_dir, scope.token)
+        try:
+            changed = await asyncio.to_thread(install_claude_desktop_entry, path, entry)
+        except DesktopConfigError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse({"configPath": str(path), "changed": changed})
 
     async def diagnostics(self, _request: Request) -> Response:
         checks = run_diagnostics_for_vault(self.vault_ctx)
