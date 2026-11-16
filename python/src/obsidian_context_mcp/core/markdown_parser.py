@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import re
 from pathlib import Path
@@ -15,6 +16,21 @@ from obsidian_context_mcp.shared.types import HeadingInfo, ParsedNote
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
 INLINE_TAG_RE = re.compile(r"(?<![\w/])#([\w\-_/]+)")
 MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+
+def _json_safe(value: Any) -> Any:
+    """YAML turns `date: 2026-11-16` into date objects; keep frontmatter JSON-serializable."""
+    if isinstance(value, (datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def _frontmatter_dict(post: frontmatter.Post) -> dict[str, Any]:
+    return _json_safe(dict(post.metadata)) if post.metadata else {}
 
 
 def detect_eol(text: str) -> str:
@@ -93,7 +109,7 @@ def parse_markdown_file(path: Path, relative_path: str) -> ParsedNote:
     text, eol = read_file_text(path)
     post = frontmatter.loads(text)
     content = post.content
-    fm = dict(post.metadata) if post.metadata else {}
+    fm = _frontmatter_dict(post)
     title = extract_title(content, fm, path.name)
     headings = extract_headings(content)
     tags = extract_tags(content, fm)
@@ -116,7 +132,7 @@ def parse_markdown_file(path: Path, relative_path: str) -> ParsedNote:
 def parse_markdown_text(relative_path: str, text: str) -> ParsedNote:
     post = frontmatter.loads(text)
     content = post.content
-    fm = dict(post.metadata) if post.metadata else {}
+    fm = _frontmatter_dict(post)
     title = extract_title(content, fm, Path(relative_path).name)
     return ParsedNote(
         relative_path=relative_path,

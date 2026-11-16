@@ -24,3 +24,22 @@ def test_wikilinks_and_links():
     note = parse_markdown_file(FIXTURES / "Getting Started.md", "Getting Started.md")
     assert "Architecture/API" in note.wikilinks
     assert any("Setup.md" in link for link in note.md_links)
+
+
+def test_frontmatter_dates_are_json_serializable():
+    import json
+
+    from obsidian_context_mcp.core.markdown_parser import parse_markdown_text
+
+    text = (
+        "---\n"
+        "date: 2026-11-16\n"
+        "updated: 2026-11-16 10:30:00\n"
+        "history:\n  - when: 2026-01-02\n"
+        "---\n# Seldon\n"
+    )
+    note = parse_markdown_text("Seldon.md", text)
+    assert note.frontmatter["date"] == "2026-11-16"
+    assert note.frontmatter["updated"] == "2026-11-16T10:30:00"
+    assert note.frontmatter["history"] == [{"when": "2026-01-02"}]
+    json.dumps(note.frontmatter)
